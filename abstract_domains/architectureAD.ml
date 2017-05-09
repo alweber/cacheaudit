@@ -15,7 +15,7 @@ let instruction_addr_base = ref (Int64.of_int 0)
 module type S =
   sig
     include AD.S
-    val init: X86Headers.t -> (((int64 * int64 * int64) list)*((reg32 * int64 * int64) list)) -> CacheAD.cache_param -> CacheAD.cache_param option -> int64 -> t
+    val init: X86Headers.t -> (((int64 * int64 * int64) list)*((reg32 * int64 * int64) list)) -> CacheAD.cache_param -> CacheAD.cache_param option -> int64 -> bool -> bool-> t
     val get_vals: t -> op32 -> (int,t) finite_set
     val test : t -> condition -> (t add_bottom)*(t add_bottom)
     val call : t -> op32 -> int -> (int,t) finite_set 
@@ -34,13 +34,13 @@ module MakeSeparate (ST: StackAD.S) (IC: CacheAD.S) = struct
     inst_ad: IC.t
   }
 
-  let init concr_mem start_values data_cache_params inst_cache_params addr_base = 
+  let init concr_mem start_values data_cache_params inst_cache_params addr_base acc accd = 
     instruction_addr_base := addr_base;
     {
-      call_ad = ST.init concr_mem start_values data_cache_params;
+      call_ad = ST.init concr_mem start_values data_cache_params acc accd;
       inst_ad = IC.init (match inst_cache_params with
           Some(params) -> params
-        | _ -> failwith "No/Invalid parameters supplied to instruction cache")
+        | _ -> failwith "No/Invalid parameters supplied to instruction cache") acc accd
     }
 
   let subs_e env call_env = {env with call_ad=call_env}

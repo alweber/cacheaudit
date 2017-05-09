@@ -39,10 +39,10 @@ module InstructionBasedAttacker (C: CacheAD.S) : CacheAD.S = struct
     init_cache : C.t; (* used to reset the cache state *)
   }
 
-  let init cp = 
+  let init cp acc accd= 
     if !history_kept == 1 then history_kept := !min_frequency;
     let initial_state = {
-      caches = C.init cp;
+      caches = C.init cp acc accd;
       leakage = unit_big_int;
     } in
     let rec add_ages i s = if i > !history_kept then s
@@ -136,7 +136,7 @@ struct
              leakage : big_int; (* maximun of the size of previous caches states *)
            }
 
-  let init cp = { cache = C.init cp; leakage = unit_big_int }
+  let init cp acc accd = { cache = C.init cp acc accd; leakage = unit_big_int }
 
   let touch x addr rw = { x with cache = C.touch x.cache addr rw }
 
@@ -171,8 +171,8 @@ struct
              in_progress : C.t IntMap.t; (* partial traces to be completed *)
            }
 
-  let init cp =
-    let init_cache = C.init cp in
+  let init cp acc accd =
+    let init_cache = C.init cp acc accd in
     { observables = IntMap.empty;
       in_progress = IntMap.singleton 0 init_cache;
     }

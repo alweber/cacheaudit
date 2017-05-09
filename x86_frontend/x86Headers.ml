@@ -56,7 +56,8 @@ let get_bits x = x.bits
 let lookup mem addr = try
     let off = virtual_to_offset mem addr in
     fst (AsmUtil.read_uint32 (AsmUtil.goto mem.bits off) 32)
-  with AddressNotInFile -> Int64.zero 
+  (*with AddressNotInFile -> Int64.zero*)
+	with AddressNotInFile -> failwith "AddressNotInFile exception is raised" 
 
 (* May raise InvalidVirtualAddress *)
 let write mem addr len value = 

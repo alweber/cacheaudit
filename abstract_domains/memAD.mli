@@ -26,7 +26,7 @@ sig
        - [mem] are initial values of registers
        - [dcp] is the configuration of the data cache, and
   *)
-  val init: (int64 -> int64 option) -> mem_param -> CacheAD.cache_param -> t
+  val init: (int64 -> int64 option) -> mem_param -> CacheAD.cache_param -> bool -> bool -> t
     
  (** [get_vals env op] returns a finite set of possible values for an op32 
       operand (which is a register/memory address/immediate), and the 
@@ -40,6 +40,10 @@ sig
   
   (** Interpret an instruction, passing its effects to CacheAD and FlagAD *)
   val interpret_instruction : t -> X86Types.instr -> t
+	(**Variant of interpret_instruction which discards the effect that the update has on the flags. 
+	Currently used for supporting Push and Pop which do not affect the flags but whose semantics is 
+	implemented by reusing arithmetic instructions that would usually change the flags.**)
+ val interpret_instruction_noflags : t -> X86Types.instr -> t
     
   (** Signals to the cache that a memory location has been accessed *)  
   val touch : t -> int64 -> NumAD.DS.rw_t -> t

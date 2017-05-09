@@ -5,6 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
+ * Extended by: Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -224,6 +225,8 @@ type arith_op =
   | Sub
   | Subb (* Sub with borrow *)
   | Xor
+	| Inc
+	| Dec
 
 
 (** Bitwise shift operations *)
@@ -241,7 +244,9 @@ type instr =
   | Arithb of arith_op * op8 * op8
   | Call of op32
   | Cmp of op32 * op32 (* Obtained by substraction of the arguments *)
+	| Cmpb of op8 * op8 (* Obtained by substraction of the arguments *)
   | Test of op32 * op32 (* tests the logical AND of the arguments *)
+	| Testb of op8 * op8 (* tests the logical AND of the arguments *)
   | Inc of op32
   | Dec of op32
   | Jcc of cc * int64
@@ -249,8 +254,11 @@ type instr =
   | Jmp of op32
   | Lea of reg32 * address
   | Imul of reg32 * op32 * int64 option
+	| Div of reg32 * reg32 * op32
   | Leave
   | Mov of op32 * op32
+	| Not of op32
+	| Cmov of cc * op32 * op32
   | Movb of op8 * op8
   | Movzx of op32 * op8
   | Exchange of reg32 * reg32
@@ -260,5 +268,7 @@ type instr =
   | Shift of shift_op * op32 * op8
   | Halt
   | Skip
+	| Shld of op32 * op32 * op8
+	| Shrd of op32 * op32 * op8
   (* | FlagSet of flag*bool (*sets the flag to the bool value *) *)
 

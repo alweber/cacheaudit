@@ -128,10 +128,10 @@ module Make (CA : CacheAD.S) = struct
   let line_size = ref (Int64.of_int 64)
   let number_sets = ref (Int64.of_int 256)
 
-  let init cache_param =
+  let init cache_param acc accd =
     line_size := (Int64.of_int cache_param.ls);
     number_sets := (Int64.of_int (cache_param.cs / cache_param.ls / cache_param.ass ));
-    { traces = Nt root; cache = CA.init cache_param} 
+    { traces = Nt root; cache = CA.init cache_param acc accd} 
         
   let get_single_parent = function
     | Single p -> p

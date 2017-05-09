@@ -9,7 +9,7 @@ module type S =
   sig
     include AD.S
 
-    val init : X86Headers.t -> MemAD.mem_param -> CacheAD.cache_param -> t
+    val init : X86Headers.t -> MemAD.mem_param -> CacheAD.cache_param -> bool -> bool -> t
     val get_vals : t -> op32 -> (int, t) finite_set
     val test : t -> condition -> t add_bottom * t add_bottom
     val call : t -> op32 -> int -> (int, t) finite_set
@@ -46,10 +46,10 @@ module Make (M: MemAD.S) = struct
     (* Move top of stack to address/register gop *)
 	  let mem1 = M.interpret_instruction mem (Mov(x,top_stack)) in
 	  (* Increment ESP by 4 -- Stack grows downwards *)
-	  M.interpret_instruction mem1 (Arith(Add, (Reg ESP), (Imm 4L)))
+	  M.interpret_instruction_noflags mem1 (Arith(Add, (Reg ESP), (Imm 4L)))
   | Push x -> (* PUSH: decrement ESP, *then* store content *)
     (* Decrement ESP by 4 *)
-  	let mem1 = M.interpret_instruction mem (Arith(Sub, (Reg ESP), (Imm 4L))) in
+  	let mem1 = M.interpret_instruction_noflags mem (Arith(Sub, (Reg ESP), (Imm 4L))) in		
   	(* Move gop to top of stack *)
   	M.interpret_instruction mem1 (Mov(top_stack, x))
   | i -> M.interpret_instruction mem i
@@ -61,12 +61,12 @@ module Make (M: MemAD.S) = struct
 	(* Move top of stack to address/register gop *)
 	let mem1 = M.interpret_instruction mem (Mov(gop, top_stack)) in
 	(* Increment ESP by 4 -- Stack grows downwards *)
-	M.interpret_instruction mem1 (Arith(Add, (Reg ESP), (Imm 4L)))
+	M.interpret_instruction_noflags mem1 (Arith(Add, (Reg ESP), (Imm 4L)))
 	  
       (* PUSH: decrement ESP, *then* store content *)
       | Apush ->
 	(* Decrement ESP by 4 *)
-	let mem1 = M.interpret_instruction mem (Arith (Sub, (Reg ESP), (Imm 4L))) in
+	let mem1 = M.interpret_instruction_noflags mem (Arith (Sub, (Reg ESP), (Imm 4L))) in
 	(* Move gop to top of stack *)
 	M.interpret_instruction mem1 (Mov(top_stack, gop))
 	 
@@ -82,7 +82,7 @@ module Make (M: MemAD.S) = struct
    (* Return top of stack and increment ESP by 4. We do not reuse
       the stackop function because POP stores its value in an
       op32 *)
-    let mem1 = M.interpret_instruction mem (Arith (Add, (Reg ESP), (Imm 4L))) in
+    let mem1 = M.interpret_instruction_noflags mem (Arith (Add, (Reg ESP), (Imm 4L))) in
     get_vals mem1 (Address {  addrDisp = -4L;addrBase = Some ESP; addrIndex = None;segBase = None;})
       
      

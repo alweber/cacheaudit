@@ -281,14 +281,14 @@ module Make(A:ArchitectureAD.S) = struct
   let env_remove pb b env =
     if List.mem b pb then env else BlockMap.remove b env
 
-  let iterate concr_mem start_values data_cache_params inst_cache_params inst_base_addr cfg =
+  let iterate concr_mem start_values data_cache_params inst_cache_params inst_base_addr cfg acc accd=
     if get_log_level IteratorLL <> Quiet then trace:= true;
     if get_log_level IteratorLL = Debug then Format.printf "CFG of %d blocks \n" (List.length cfg);
     let start_block = List.hd cfg in
     let final_blocks = List.filter (fun b -> b.out_edges = []) cfg in
     (* init_env and env below map blocks to their incoming non-empty abstract
      * environments *)
-    let init_env = BlockMap.singleton start_block (A.init concr_mem start_values data_cache_params inst_cache_params inst_base_addr) in
+    let init_env = BlockMap.singleton start_block (A.init concr_mem start_values data_cache_params inst_cache_params inst_base_addr acc accd) in
     if !trace then Format.printf "@[Initially, %a@]@." print init_env;
     let wto = tarjan cfg in
     let wto = if !unroll_outer_loop then wto else dont_unroll_outer wto in

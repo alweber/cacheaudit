@@ -50,9 +50,9 @@ module DS = struct
   module IntSetSet = Set.Make(IntSet)
   
   
-  type flags_t = { cf : bool; zf : bool; }
-  let initial_flags = {cf = false; zf = false}
-  (* Assumption: Initially no flag is set *)
+	type flags_t = { cf : bool; zf : bool; sf : bool; o_f : bool;}
+  let initial_flags = {cf = false; zf = false; sf = false; o_f = false} (* cf: Carry flag; zf: Zero flag; sf: Sign flag; o_f: Overflow flag *)
+  (* Assumption: Initially no flag is set *)                            (* since of is a key word in Ocaml, Overflow flag is named as o_f*)
   
   module FlagMap = Map.Make(struct 
       type t = flags_t 

@@ -24,6 +24,11 @@ let print_ass = ref false
 let analyze = ref true
 let interval_cache = ref false
 let do_traces = ref true
+(*booleans for selecting differnet attackers*)
+let do_time = ref true
+let do_trace = ref true
+let do_acc = ref true
+let do_accd = ref true
 let opt_precision = ref false
 
 
@@ -132,6 +137,14 @@ let speclist = [
       is >= 8 and cache is small");
     ("--no-trace-time", Arg.Unit (fun () -> do_traces := false),
       "disable tracking of traces and time");
+		("--only-time", Arg.Unit (fun () -> do_time := true; do_trace := false; do_acc := false; do_accd := false),
+      "only track traces");
+    ("--only-trace", Arg.Unit (fun () -> do_trace := true; do_time := false; do_acc := false; do_accd := false),
+      "only track time");
+		("--only-acc", Arg.Unit (fun () -> do_traces := false; do_acc := true; do_time := false; do_trace := false; do_accd := false),
+      "only track acc");
+		("--only-accd", Arg.Unit (fun () -> do_traces := false; do_accd := true; do_time := false; do_acc := false; do_trace := false),
+      "only track accd");
     ("--unroll", Arg.Int (fun u -> Iterator.unroll_count:=u), "number of loop unrollings");
     ("--no-outer-unroll", Arg.Unit (fun () -> Iterator.unroll_outer_loop:=false), 
       "overrules the --unroll option, so that outer loops 
@@ -262,7 +275,13 @@ let _ =
         | OneTimedInterrupt -> 
           (module AsynchronousAttacker.OneTimeInterrupt(BaseCache) : CacheAD.S) in
         let module AtCache = (val attacked_cache: CacheAD.S) in
-        if !do_traces then (module TraceAD.Make (AtCache) : CacheAD.S)
+        if !do_traces then 
+					if !do_time==false 
+						then (module TraceADWithoutTime.Make (AtCache) : CacheAD.S)
+						else 
+							if !do_trace==false 
+								then (module TraceADWithoutTraces.Make (AtCache) : CacheAD.S)
+								else (module TraceAD.Make (AtCache) : CacheAD.S)
         else attacked_cache in
       (* end of generate_cache definition *)
         
@@ -287,6 +306,6 @@ let _ =
       let iterate = Iter.iterate in
       let start = Sys.time () in 
       (* Run the analysis *)
-      iterate sections start_values data_cache_params (Some(inst_cache_params)) !instruction_base_addr (Cfg.makecfg !start_addr sections);
-      Printf.printf "Analysis took %d seconds.\n" (int_of_float (Sys.time () -. start))
+      iterate sections start_values data_cache_params (Some(inst_cache_params)) !instruction_base_addr (Cfg.makecfg !start_addr sections) !do_acc !do_accd;
+	    Printf.printf "\nAnalysis took %d seconds.\n" (int_of_float (Sys.time () -. start))
     end

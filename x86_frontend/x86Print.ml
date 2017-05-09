@@ -5,6 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
+ * Extended by: Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -153,7 +154,9 @@ let pp_instr fmt = function
   | Arithb (aop, dst, src) -> fprintf fmt "@[%aB@ %a,@ %a@]" pp_arith_op aop pp_op8 dst pp_op8 src
   | Call dst -> fprintf fmt "@[ CALL@ %a@]" pp_genop_addr32 dst
   | Cmp (dst, src) -> fprintf fmt "@[@ CMP@ %a,@ %a@]" pp_op32 dst pp_op32 src
+	| Cmpb (dst, src) -> fprintf fmt "@[@ CMP@ %a,@ %a@]" pp_op8 dst pp_op8 src
   | Test (dst, src) -> fprintf fmt "@[@ TEST@ %a,@ %a@]" pp_op32 dst pp_op32 src
+	| Testb (dst, src) -> fprintf fmt "@[@ TEST@ %a,@ %a@]" pp_op8 dst pp_op8 src
   | Inc gop -> fprintf fmt "@[@ INC@ %a@]" pp_op32 gop
   | Dec gop -> fprintf fmt "@[@ DEC@ %a@]" pp_op32 gop
   | Jcc (cc, imm) -> fprintf fmt "@[@ J%a@ %a@]" pp_cc cc pp_addr imm
@@ -163,11 +166,13 @@ let pp_instr fmt = function
       | Some i -> fprintf fmt "@[@ IMUL@ %a,@ %a,@ %a@]" pp_reg32 dst pp_op32 src pp_addr i
       | None -> fprintf fmt "@[@ IMUL@ %a,@ %a@ ]" pp_reg32 dst pp_op32 src
     end 
+	| Div (dst1, dst2, src) ->  fprintf fmt "@[@ DIV@ %a:%a@,@ %a@]" pp_reg32 dst1 pp_reg32 dst2 pp_op32 src
   | Lea (dst, src) -> fprintf fmt "@[@ LEA@ %a,@ %a@]" pp_reg32 dst pp_address src
   | Leave -> fprintf fmt "@[ LEAVE@]"
   | Mov (dst, src) -> fprintf fmt "@[@ MOV@ %a,@ %a@]" pp_op32 dst pp_op32 src
   | Movb (dst, src) -> fprintf fmt "@[ MOVB@ %a,@ %a@]" pp_op8 dst pp_op8 src
   | Movzx (dst, src) -> fprintf fmt "@[ MOVZX@ %a,@ %a@]" pp_op32 dst pp_op8 src
+  | Not gop -> fprintf fmt "@[ NOT@ %a@]" pp_op32 gop
   | Exchange (r1, r2) -> fprintf fmt "@[ EXCHG@ %a,@ %a@]" pp_reg32 r1 pp_reg32 r2
   | Pop gop -> fprintf fmt "@[ POP@ %a@]" pp_op32 gop
   | Push gop -> fprintf fmt "@[ PUSH@ %a@]" pp_op32 gop
@@ -175,7 +180,9 @@ let pp_instr fmt = function
   | Shift (sop, dst, offset) -> fprintf fmt "@[@ %a@ %a,@ %a@]" pp_shift_op sop pp_op32 dst pp_op8 offset
   | Halt -> fprintf fmt "@[ HALT @]"
   | Skip -> fprintf fmt "@[ SKIP @]"
-  (* | FlagSet (f, v) -> if v then fprintf fmt "@[@ Set %a@]" pp_flag f   *)
+ 	| Shld (sregmem, patternreg, offsetregimm) -> fprintf fmt "@[@ SHLD@ %a@ %a,@ %a@]" pp_op32 sregmem pp_op32 patternreg pp_op8 offsetregimm
+	| Shrd (sregmem, patternreg, offsetregimm) -> fprintf fmt "@[@ SHRD@ %a@ %a,@ %a@]" pp_op32 sregmem pp_op32 patternreg pp_op8 offsetregimm
+	| Cmov (cc, dst, src) -> fprintf fmt "@[@ CMOV@ %a,@ %a,@ %a@]" pp_cc cc pp_op32 dst pp_op32 src 
   (*                          else fprintf fmt "@[@ Clear %a@]" pp_flag f *)
   (* | _ -> raise (PrintExn "x86Print: Unsupported instruction") *)
 

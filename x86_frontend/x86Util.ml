@@ -5,6 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
+ * Extended by: Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -467,6 +468,8 @@ let arith_op_to_string = function
   | Sub -> "SUB"
   | Subb -> "SBB"
   | Xor -> "XOR"
+	| Inc -> "INC"
+	| Dec -> "DEC"
 
 let arith_op_to_int = function
     Add -> 0
@@ -477,6 +480,8 @@ let arith_op_to_int = function
   | Sub -> 5
   | Subb -> 3
   | Xor -> 6
+	| Inc -> failwith "Inc has not integer encoding."
+	| Dec -> failwith "Dec has not integer encoding."
 
 let int_to_arith_op = function
     0 -> Add

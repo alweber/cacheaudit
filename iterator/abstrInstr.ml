@@ -7,9 +7,11 @@
 type flag_op = Acmp | Atest 
             (* | ADfset of X86Types.flag*bool *)
 
-type abstr_op = Aarith of X86Types.arith_op | Amov | Aexchg | 
-  Ashift of X86Types.shift_op | Aflag of flag_op
+type abstr_op = Aarith of X86Types.arith_op | Amov | Aexchg 
+	| AShld  | AShrd 
+	| Ashift of X86Types.shift_op | Aflag of flag_op
   | Aimul | Aset
+	| Adiv | Anot | Acmov of X86Types.cc
 
 type stack_op = Apop | Apush
 

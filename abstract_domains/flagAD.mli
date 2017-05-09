@@ -7,8 +7,7 @@ open AD.DS
 open NumAD.DS
 
 (** Flag abstract domain: keeps track of the relationship of flags and
-    variable values. Currently restricted to combinations of CF and
-    ZF) *)
+    variable values.  *)
 
 module type S = 
 sig
@@ -46,7 +45,17 @@ sig
       [op] on [dst] and [src], where the masks [mskdst] and [msksrc]
       specify whether 8 or 32 bit of the operand are involved. 
       [arg3] is an optional argument currently only used for 3-argument IMUL. *)
-  val update_val : t -> var -> mask -> cons_var -> mask -> abstr_op -> int64 option -> t
+  val update_val : t -> var -> mask -> cons_var -> mask -> abstr_op -> int64 option -> bool option -> t
+	
+  (** Version of update_val which discards the effect that the update has on the flags. 
+	Currently used for supporting Push and Pop which do not affect the flags but whose semantics is 
+	implemented by reusing arithmetic instructions that would usually change the flags.**)
+  val update_val_noflags : t -> var -> mask -> cons_var -> mask -> abstr_op -> t		
+	
+	(** version of update_val which updates two destination variables. Currently it
+	is used for division which stores the result in one variable and the remainder in 
+	another variable.*)	
+	val update_val_twodst: t -> var -> mask -> var -> mask -> cons_var -> mask -> abstr_op -> t 
   
   (** [updval_set env flags dst mask op] performs a Set-instruction *)
   val updval_set : t -> var -> mask -> cc -> t

@@ -22,5 +22,5 @@ module Make :
         MemAD.mem_param ->
         CacheAD.cache_param ->
         CacheAD.cache_param option -> int64 -> 
-	Cfg.basicblock list -> unit
+	Cfg.basicblock list -> bool -> bool-> unit
     end

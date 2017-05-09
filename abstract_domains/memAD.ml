@@ -27,10 +27,12 @@ type mem_param = mem_init_values * reg_init_values
 module type S =
   sig
     include AD.S
-  val init: (int64 -> int64 option) -> mem_param -> CacheAD.cache_param -> t
+
+  val init: (int64 -> int64 option) -> mem_param -> CacheAD.cache_param -> bool -> bool -> t
   val get_vals: t -> op32 -> (int,t) finite_set
   val test : t -> condition -> (t add_bottom)*(t add_bottom)
   val interpret_instruction : t -> X86Types.instr -> t
+	val interpret_instruction_noflags : t -> X86Types.instr -> t
   val touch : t -> int64 -> rw_t -> t
   val elapse : t -> int -> t
 end
@@ -115,11 +117,11 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
     List.fold_left (fun m x -> let addr,_,_ = x in MemSet.add addr m) m memList
 
  (* Return an element of type t with initialized registers *)
-  let init iv (memList,regList) cache_params = {
+  let init iv (memList,regList) cache_params acc accd = {
     vals = initVals (initRegs (F.init var_to_string) regList) memList;
     memory = initMemory MemSet.empty memList;
     initial_values = iv;
-    cache = C.init cache_params
+    cache = C.init cache_params acc accd
   }
 
   
@@ -226,18 +228,18 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
             let mask = Mask (rem_to_mask (Int64.logand (Int64.lognot a) 3L)) in
             new_a, mask in
         let access_addr (a,avals) = 
-          let new_cache = C.touch env.cache a rw in
+          let new_cache = C.touch env.cache a rw in 
           let a,mask = get_a_mask a in
           (* Update the values to environment corresponding to a (which excludes*)
           (* values connected to other possible evaluations of a).*)
           (* In older version was only performed on Read, now it is moved here *)
           (* as I don't see why this shouldn't be done at a write. *)
           let env = {env with vals = avals} in
-          let new_a,new_env = match rw with
-          | Read ->
-              if MemSet.mem a env.memory then VarOp a, env
+          let new_a,new_env = match rw with 
+          | Read ->						  
+              if MemSet.mem a env.memory then VarOp a, env 
               else begin
-                match env.initial_values a with
+                match env.initial_values a with 
                 (* when we only read variable with initial value, there is*)
                 (*  no need to maintain  it in memory, treat it as a constant *)
                 | Some v -> Cons v, env 
@@ -252,15 +254,15 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
                     (* we will be changing the content of the variable, so make*)
                     (* sure the initial value is in memory before that *)
                     {env with vals = 
-                      F.update_val env.vals a NoMask (Cons value) NoMask Amov None}
+                      F.update_val env.vals a NoMask (Cons value) NoMask Amov None None}
                   | None ->  env in
             VarOp a, env in
           new_a, mask, {new_env with cache = new_cache} in
         (* Get list of possible addresses, simulate access to all of them and *)
         (* return the list of corresponding variables and environments *)
         let addrList = get_addresses env addr in
-        assert(addrList<>[]);
-        List.map access_addr addrList
+				assert(addrList<>[]);
+        List.map access_addr addrList 
       ) with Is_Top -> 
         failwith ("Top in a set of values referencing addresses, cannot continue\n"^
 		"Possible solution: increase the unroll size, e.g. --unroll 1024")
@@ -274,6 +276,26 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
     | Op32(Address _), _ | Op8(Address _), _ -> ed
     | _, Op32(Address _) | _, Op8(Address _) -> es
     | _, _ -> ed
+
+  let get_access_env_twodst d1 d2 s ed1 ed2 es = 
+    match d1, d2, s with
+		| Op32(Address _), Op8(Address _), Op32(Address _) | Op8(Address _), Op32(Address _), Op32(Address _)
+		| Op32(Address _), Op32(Address _), Op8(Address _) | Op8(Address _), Op8(Address _), Op32(Address _)	 
+		| Op32(Address _), Op8(Address _), Op8(Address _) | Op8(Address _), Op32(Address _), Op8(Address _)		
+		| Op32(Address _), Op32(Address _), Op32(Address _) | Op8(Address _), Op8(Address _), Op8(Address _)
+		| Op32(Address _), Op32(Address _), _ | Op8(Address _), Op8(Address _), _ 
+		| Op32(Address _), _, Op32(Address _) | Op8(Address _), _ , Op8(Address _) 
+		|  _, Op32(Address _), Op32(Address _) | _ , Op8(Address _), Op8(Address _) 
+		| Op32(Address _), Op8(Address _), _ | Op8(Address _), Op32(Address _), _ 
+		| Op32(Address _), _, Op8(Address _) | Op8(Address _), _ , Op32(Address _) 
+		|  _, Op32(Address _), Op8(Address _) | _ , Op8(Address _), Op32(Address _) 		
+		->
+      failwith "Memory-to-memory operation not supported" 
+      (* would currently record only one cache access *)
+    | Op32(Address _), _, _ | Op8(Address _), _, _  -> ed1
+    |  _, Op32(Address _), _ |  _, Op8(Address _), _  -> ed2
+    | _, _, Op32(Address _) | _, _, Op8(Address _) -> es
+    | _, _,_ -> ed1
   
   let is_reg op = match op with
   | Op32(Reg _) | Op8(Reg _) -> true
@@ -282,37 +304,106 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
   (* Updates the memory according to the actions perscribed by op; *)
   (* get the possible sources and destitnations and pass further changes *)
   (* to FlagAD and CacheAD *)
-  let update_mem env op dst src arg3 = try (
-    if op <> Aimul then assert (arg3 = None);
+  let update_mem env op dst src arg3 arg4 = try ( 	  
+		if ((op <> Aimul)) then assert (arg3 = None);
+		if ((op <> AShld) && (op <> AShrd)) then assert (arg4 = None);
+		let arg2 = match arg4 with		
+		  | Some (Reg x) -> Some (reg_to_var (r8_to_r32 x))
+			| Some (Imm i) -> Some i
+			| Some (Address a) -> failwith (Printf.sprintf "memAD: Unexpected operand (Address) for instruction SHLD/SHRD.")
+		  | None -> arg3	in
+
     let read_or_write = match op with Aflag _ -> Read | _ -> Write in
     let dlist = get_consvars env dst read_or_write in
     assert(dlist <> []);
-    let slist = get_consvars env src Read in
+    let slist = get_consvars env src Read in 
     assert(slist <> []);
     (* For every possible value of src and dst, do dst = dst op src, updating *)
     (* the values by passing the operation to update_val from FlagAD. *)
-    let perform_op op dst dlist src slist arg3 =
+		let perform_op op dst dlist src slist arg2 isimm =
       let do_op (s,smask,es) = List.map (fun (d,dmask,ed) -> 
         let access_env = (get_access_env dst src ed es) in
          { access_env with vals = 
-          F.update_val access_env.vals (consvar_to_var d) dmask s smask op arg3}
+						F.update_val access_env.vals (consvar_to_var d) dmask s smask op arg2 isimm}
         ) dlist in
       list_join (List.concat (List.map do_op slist)) in
     let res = 
       match op with
-      | Aarith _ | Ashift _ | Amov | Aflag _ -> 
-          perform_op op dst dlist src slist arg3
+			| AShld | AShrd -> 
+				let isimm = match arg4 with 
+					| Some (Imm i) -> true
+					| _ -> false in
+					perform_op op dst dlist src slist arg2 (Some isimm)
+			| Aarith _ | Acmov _ | Ashift _ | Amov | Aflag _ | Aimul | Adiv | Anot -> 
+					perform_op op dst dlist src slist arg2 None
       | Aexchg -> 
-          let s_to_d_vals = perform_op Amov dst dlist src slist arg3 in
-          let d_to_s_vals = perform_op Amov src slist dst dlist arg3 in
-          join s_to_d_vals d_to_s_vals
-      | Aimul ->
-        perform_op Aimul dst dlist src slist arg3 
+					let s_to_d_vals = perform_op Amov dst dlist src slist arg2 None in
+          let d_to_s_vals = perform_op Amov src slist dst dlist arg2 None in
+          join s_to_d_vals d_to_s_vals			
       | _ -> assert false in
      {res with cache = C.elapse res.cache time_instr}
   ) with Bottom -> failwith 
     "MemAD.update_mem: Bottom in memAD after an operation on non bottom env"
   
+	
+	
+  let update_mem_noflags env op dst src = try ( 	  
+    let read_or_write = Write in
+    let dlist = get_consvars env dst read_or_write in 
+    assert(dlist <> []);
+    let slist = get_consvars env src Read in 
+    assert(slist <> []);
+    (* For every possible value of src and dst, do dst = dst op src, updating *)
+    (* the values by passing the operation to update_val from FlagAD. *)
+		let perform_op op dst dlist src slist =
+      let do_op (s,smask,es) = List.map (fun (d,dmask,ed) -> 
+        let access_env = (get_access_env dst src ed es) in
+         { access_env with vals = 
+						F.update_val_noflags access_env.vals (consvar_to_var d) dmask s smask op}
+        ) dlist in
+      list_join (List.concat (List.map do_op slist)) in
+    let res = 
+      match op with
+			| Aarith Add | Aarith Sub  -> 
+					perform_op op dst dlist src slist
+      | _ -> assert false in
+     {res with cache = C.elapse res.cache time_instr}
+  ) with Bottom -> failwith 
+    "MemAD.update_mem: Bottom in memAD after an operation on non bottom env"	
+	
+	
+	
+  let update_mem_twodst env op dst1 dst2 src  = try ( 	  
+		(*ensure that at least one dst is a register so that we don't have to touch two memory lines*)
+    let read_or_write = match op with Aflag _ -> Read | _ -> Write in
+    let dlist1 = get_consvars env dst1 read_or_write in 
+    assert(dlist1 <> []);
+    let dlist2 = get_consvars env dst2 read_or_write in 
+    assert(dlist2 <> []);		
+    let slist = get_consvars env src Read in 
+    assert(slist <> []);
+    (* For every possible value of src and dst, do dst = dst op src, updating *)
+    (* the values by passing the operation to update_val from FlagAD. *)
+		let perform_op op dst1 dlist1 dst2 dstlist2 src slist  =
+      let do_op (s,smask,es) (d1, d1mask, ed1) = List.map (fun (d2,d2mask,ed2) -> 
+        let access_env = (get_access_env_twodst dst1 dst2 src ed1 ed2 es) in
+         { access_env with vals = 
+						F.update_val_twodst access_env.vals (consvar_to_var d1) d1mask (consvar_to_var d2) d2mask s smask op}
+        ) dlist2 in
+			let do_ops (s,smask,es) = (List.concat (List.map (do_op (s,smask,es)) dlist1)) in	
+      list_join (List.concat (List.map do_ops slist)) in
+    let res = 
+      match op with
+			| Adiv ->
+				perform_op Adiv dst1 dlist1 dst2 dlist2 src slist 
+      | _ -> assert false in
+     {res with cache = C.elapse res.cache time_instr}
+  ) with Bottom -> failwith 
+    "MemAD.update_mem: Bottom in memAD after an operation on non bottom env"	
+	
+		
+	
+	
   let updmem_set env dst cc = 
     let dlist = get_consvars env dst Write in
     assert(dlist <> []);
@@ -329,42 +420,61 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
       let addrList = get_addresses env addr in
       let regVar = reg_to_var reg in
       let envList = List.map (fun (x,e) -> { env with vals = 
-        F.update_val e regVar NoMask (Cons x) NoMask Amov None }) addrList in
+        F.update_val e regVar NoMask (Cons x) NoMask Amov None None}) addrList in
       list_join envList
     ) with Bottom -> failwith 
       "MemAD.load_address: bottom after an operation on non bottom environment"
     ) with Is_Top -> let regVar = reg_to_var reg in 
       {env with vals = F.set_var env.vals regVar 0L 0xffffffffL} 
     in {res with cache = C.elapse res.cache time_effective_load}
-  
-  
+
+	
   (*** Public functions ***)
-  
+  let rec interpret_instruction_noflags env instr = match instr with
+  | Arith(op, dst, src) -> begin
+      match op with
+			| Add | Sub -> update_mem_noflags env (Aarith op) (Op32 dst) (Op32 src)
+			| _ -> failwith "memAD: The reuse of arithmetic instructions by 
+			discarding the resulting flags is only implemented for Add and Sub."
+	end
+	| _ -> failwith "memAD: The reuse of arithmetic instructions by 
+			discarding the resulting flags is only implemented for Add and Sub."
+	 
   let rec interpret_instruction env instr = match instr with
   | Arith(op, dst, src) -> begin
       match op with
         CmpOp -> interpret_instruction env (Cmp(dst,src))
-      | _ -> update_mem env (Aarith op) (Op32 dst) (Op32 src) None
+			| _ -> update_mem env (Aarith op) (Op32 dst) (Op32 src) None None
     end
   | Arithb(op, dst, src) -> begin
           match op with
             CmpOp -> failwith "8-bit CMP not implemented"
-          | _ -> update_mem env (Aarith op) (Op8 dst) (Op8 src) None
+					| _ -> update_mem env (Aarith op) (Op8 dst) (Op8 src) None None
     end
-  | Mov(dst,src) -> update_mem env Amov (Op32 dst) (Op32 src) None
-  | Movb(dst,src) -> update_mem env Amov (Op8 dst) (Op8 src) None
+	| Mov(dst,src) -> update_mem env Amov (Op32 dst) (Op32 src) None None 
+	| Cmov(cc, dst,src) -> update_mem env (Acmov cc) (Op32 dst) (Op32 src) None None 
+  | Movb(dst,src) -> update_mem env Amov (Op8 dst) (Op8 src) None None
   | Exchange(dst,src) -> 
-    update_mem env Aexchg (Op32 (Reg dst)) (Op32 (Reg src)) None
-  | Movzx(dst32,src8) -> update_mem env Amov (Op32 dst32) (Op8 src8) None
+    update_mem env Aexchg (Op32 (Reg dst)) (Op32 (Reg src)) None None
+  | Movzx(dst32,src8) -> update_mem env Amov (Op32 dst32) (Op8 src8) None None
   | Lea(r,a) -> load_address env r a
+	| Not dst -> update_mem env Anot (Op32 dst) (Op32 (Imm 0xFFFFFFFFL)) None None
   | Imul(dst,src,imm) -> 
-    update_mem env Aimul (Op32 (Reg dst)) (Op32 src) imm
+    update_mem env Aimul (Op32 (Reg dst)) (Op32 src) imm None
+	| Div(dst1, dst2, src) -> 
+    update_mem_twodst env Adiv (Op32 (Reg dst1)) (Op32 (Reg dst2)) (Op32 src)
   | Shift(sop,dst32,offst8) -> 
-    update_mem env (Ashift sop) (Op32 dst32) (Op8 offst8) None
-  | Cmp(dst, src) -> update_mem env (Aflag Acmp) (Op32 dst) (Op32 src) None
-  | Test(dst, src) -> update_mem env (Aflag Atest) (Op32 dst) (Op32 src) None
-  | Inc x -> interpret_instruction env (Arith (Add, x, Imm 1L)) (*TODO: check that the effect on flags is correct *)
-  | Dec x -> interpret_instruction env (Arith (Sub, x, Imm 1L))
+    update_mem env (Ashift sop) (Op32 dst32) (Op8 offst8) None None		
+	| Shld (sregmem, patternreg, offsetregimm) ->
+		update_mem env AShld (Op32 sregmem) (Op32 patternreg) None (Some offsetregimm)
+	| Shrd (sregmem, patternreg, offsetregimm) ->
+		update_mem env AShrd (Op32 sregmem) (Op32 patternreg) None (Some offsetregimm)
+	| Cmp(dst, src) -> update_mem env (Aflag Acmp) (Op32 dst) (Op32 src) None None
+	| Cmpb(dst, src) -> update_mem env (Aflag Acmp) (Op8 dst) (Op8 src) None None
+  | Test(dst, src) -> update_mem env (Aflag Atest) (Op32 dst) (Op32 src) None None
+	| Testb(dst, src) -> update_mem env (Aflag Atest) (Op8 dst) (Op8 src) None None
+  | Inc x -> update_mem env (Aarith Inc) (Op32 x) (Op32 (Imm 1L)) None None
+  | Dec x -> update_mem env (Aarith Dec) (Op32 x) (Op32 (Imm 1L)) None None
   | Set (cc,dst) -> updmem_set env (Op8 dst) cc
   | i -> Format.printf "@[Unexpected instruction %a @, 
     in MemAD.interpret_instruction@]@." X86Print.pp_instr i;

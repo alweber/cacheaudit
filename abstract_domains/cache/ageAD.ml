@@ -56,16 +56,85 @@ module Make (V: ValAD.S) = struct
     let get_values flgs = try( 
         Nb (FlagMap.find flgs fmap)
       ) with Not_found -> Bot in
-     get_values {cf = true; zf = true},
-     get_values {cf = true; zf = false},
-     get_values {cf = false; zf = true},
-     get_values {cf = false; zf = false}
+	   get_values {cf = true; zf = true; sf = false; o_f = false},
+     get_values {cf = true; zf = false; sf = false; o_f = false},
+     get_values {cf = false; zf = true; sf = false; o_f = false},
+     get_values {cf = false; zf = false; sf = false; o_f = false},
+		 get_values {cf = true; zf = true; sf = true; o_f = false},
+     get_values {cf = true; zf = false; sf = true; o_f = false},
+     get_values {cf = false; zf = true; sf = true; o_f = false},
+     get_values {cf = false; zf = false; sf = true; o_f = false},
+		 get_values {cf = true; zf = true; sf = false; o_f = true},
+     get_values {cf = true; zf = false; sf = false; o_f = true},		
+     get_values {cf = false; zf = true; sf = false; o_f = true},
+     get_values {cf = false; zf = false; sf = false; o_f = true},
+		 get_values {cf = true; zf = true; sf = true; o_f = true},
+     get_values {cf = true; zf = false; sf = true; o_f = true},
+     get_values {cf = false; zf = true; sf = true; o_f = true},
+     get_values {cf = false; zf = false; sf = true; o_f = true}
   
   (* computes comparison of x1 and x2, see vguard below *)
   (* the first result is x1<x2, the second one x1=x2 and the last one x1>x2 *)
+	(*This works only for unsigned values, but ages should be positive.*)
   let vcomp venv x1 x2 = 
-    let _,tf,ft,ff= fmap_to_tuple (V.update_val venv initial_flags x1 NoMask x2 NoMask (Aflag Acmp) None) in
-    (* Since we only have positive values, when the carry flag is set, it means venv is strictly smaller than x2 *)
+		let ttff, tfff, ftff, ffff, tttf, tftf, fttf, fftf, ttft, tfft, ftft, ffft, tttt, 
+		  tftt, fttt, fftt = 
+				fmap_to_tuple (V.update_val venv initial_flags x1 NoMask x2 NoMask (Aflag Acmp) None None) in
+		(* partition feasible combinations into 3 classes, which represent the conditions that the first operand is smaller/equal/larger than the second one *)
+		let tf = (* smaller in unsigned case: cf=1,  zf=0*)
+			match tfff,tftf,tfft,tftt with
+			| Nb env1, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 (V.join env1 env2)))
+			| Bot, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 env2))
+			| Nb env1, Bot, Nb env3, Nb env4 ->	Nb (V.join env4 (V.join env3 env1))			
+			| Nb env1, Nb env2, Bot, Nb env4 ->	Nb (V.join env4 (V.join env1 env2))							
+			| Nb env1, Nb env2, Nb env3, Bot -> Nb (V.join env3 (V.join env1 env2))
+			| Bot, Bot, Nb env3, Nb env4 -> Nb (V.join env4 env3)
+			| Bot, Nb env2, Bot, Nb env4 -> Nb (V.join env4 env2)
+			| Bot, Nb env2, Nb env3, Bot -> Nb (V.join env3 env2)
+			| Nb env1, Bot, Bot, Nb env4 ->	Nb (V.join env4 env1)	
+			| Nb env1, Bot, Nb env3, Bot ->	Nb (V.join env3 env1)		
+			| Nb env1, Nb env2, Bot, Bot ->	Nb (V.join env1 env2)				
+			| Nb env, Bot, Bot, Bot -> Nb env 
+			| Bot, Nb env, Bot, Bot -> Nb env 
+			| Bot, Bot, Nb env, Bot -> Nb env 
+			| Bot, Bot, Bot, Nb env -> Nb env 
+			| Bot, Bot, Bot, Bot ->	Bot in		
+	let ft = (* equal in unsigned case: cf=0, zf=1*)
+			match ftff, ftft, fttf, fttt with
+			| Nb env1, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 (V.join env1 env2)))
+			| Bot, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 env2))
+			| Nb env1, Bot, Nb env3, Nb env4 ->	Nb (V.join env4 (V.join env3 env1))			
+			| Nb env1, Nb env2, Bot, Nb env4 ->	Nb (V.join env4 (V.join env1 env2))							
+			| Nb env1, Nb env2, Nb env3, Bot -> Nb (V.join env3 (V.join env1 env2))
+			| Bot, Bot, Nb env3, Nb env4 -> Nb (V.join env4 env3)
+			| Bot, Nb env2, Bot, Nb env4 -> Nb (V.join env4 env2)
+			| Bot, Nb env2, Nb env3, Bot -> Nb (V.join env3 env2)
+			| Nb env1, Bot, Bot, Nb env4 ->	Nb (V.join env4 env1)	
+			| Nb env1, Bot, Nb env3, Bot ->	Nb (V.join env3 env1)		
+			| Nb env1, Nb env2, Bot, Bot ->	Nb (V.join env1 env2)				
+			| Nb env, Bot, Bot, Bot -> Nb env 
+			| Bot, Nb env, Bot, Bot -> Nb env 
+			| Bot, Bot, Nb env, Bot -> Nb env 
+			| Bot, Bot, Bot, Nb env -> Nb env 
+			| Bot, Bot, Bot, Bot ->	Bot in					
+	let ff = (* bigger in unsigned case: zf=0, cf=0*)
+			match ffff, ffft, fftf, fftt with
+			| Nb env1, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 (V.join env1 env2)))
+			| Bot, Nb env2, Nb env3, Nb env4 -> Nb (V.join env4 (V.join env3 env2))
+			| Nb env1, Bot, Nb env3, Nb env4 ->	Nb (V.join env4 (V.join env3 env1))			
+			| Nb env1, Nb env2, Bot, Nb env4 ->	Nb (V.join env4 (V.join env1 env2))							
+			| Nb env1, Nb env2, Nb env3, Bot -> Nb (V.join env3 (V.join env1 env2))
+			| Bot, Bot, Nb env3, Nb env4 -> Nb (V.join env4 env3)
+			| Bot, Nb env2, Bot, Nb env4 -> Nb (V.join env4 env2)
+			| Bot, Nb env2, Nb env3, Bot -> Nb (V.join env3 env2)
+			| Nb env1, Bot, Bot, Nb env4 ->	Nb (V.join env4 env1)	
+			| Nb env1, Bot, Nb env3, Bot ->	Nb (V.join env3 env1)		
+			| Nb env1, Nb env2, Bot, Bot ->	Nb (V.join env1 env2)				
+			| Nb env, Bot, Bot, Bot -> Nb env 
+			| Bot, Nb env, Bot, Bot -> Nb env 
+			| Bot, Bot, Nb env, Bot -> Nb env 
+			| Bot, Bot, Bot, Nb env -> Nb env 
+			| Bot, Bot, Bot, Bot ->	Bot in				
     (* The case where there is a carry and the result is zero should not be 
 possible, so it approximates Bottom *)
    tf,ft,ff
@@ -82,7 +151,7 @@ possible, so it approximates Bottom *)
       match young with
       | Bot -> env.value
       | Nb yenv ->
-        let yenv = flatten (V.update_val yenv initial_flags v NoMask (Cons 1L) NoMask (Aarith X86Types.Add) None) in
+        let yenv = flatten (V.update_val yenv initial_flags v NoMask (Cons 1L) NoMask (Aarith X86Types.Add) None None) in
         match nyoung with
         | Bot -> yenv
         | Nb nyenv -> V.join yenv nyenv
@@ -96,7 +165,7 @@ possible, so it approximates Bottom *)
       let value = if not (is_var env v) then 
                   V.new_var env.value v
                 else env.value
-      in let value = flatten(V.update_val value initial_flags v NoMask (Cons(Int64.of_int a)) NoMask Amov None) in
+      in let value = flatten(V.update_val value initial_flags v NoMask (Cons(Int64.of_int a)) NoMask Amov None None) in
       {env with value = value}
   
   

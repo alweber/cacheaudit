@@ -18,9 +18,7 @@ sig
        - [dcp] and [icp] are the configurations of data and instruction caches, and
        - [ba] is the base address of instructions.
   *)
-  val init: X86Headers.t -> 
-    (((int64 * int64 * int64) list)*((reg32 * int64 * int64) list)) -> 
-    CacheAD.cache_param -> CacheAD.cache_param option -> int64 -> t
+    val init: X86Headers.t -> (((int64 * int64 * int64) list)*((reg32 * int64 * int64) list)) -> CacheAD.cache_param -> CacheAD.cache_param option -> int64 -> bool -> bool-> t
  
     
   (** For an op32 expression, returns a finite list of possible

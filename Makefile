@@ -49,6 +49,8 @@ ML_FILES := \
 	abstract_domains/cache/ageAD.ml\
 	abstract_domains/flagAD.ml\
 	abstract_domains/cache/traceAD.ml\
+	abstract_domains/cache/traceADWithoutTime.ml\
+	abstract_domains/cache/traceADWithoutTraces.ml\
 	abstract_domains/cache/cacheAD.ml\
 	abstract_domains/cache/asynchronousAttacker.ml\
 	abstract_domains/cache/accessAD.ml\

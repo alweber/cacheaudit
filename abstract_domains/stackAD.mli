@@ -20,7 +20,7 @@ sig
        - [dcp] is the configuration of the data caches
     *)
 
-  val init : X86Headers.t -> MemAD.mem_param -> CacheAD.cache_param -> t
+  val init : X86Headers.t -> MemAD.mem_param -> CacheAD.cache_param -> bool -> bool -> t
 
   (** For an op32 expression, returns a finite list of possible
       values, each value associated with an approximation of the

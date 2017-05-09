@@ -22,7 +22,8 @@ type cache_param = {
 (** The signature of the cache abstract domain *)
 module type S = sig
   include AD.S
-  val init : cache_param -> t
+	(*first bool selects whether acc shall be counted, second bool selects whether accd shall be counted*)
+  val init : cache_param -> bool -> bool -> t
   (** Initialize an empty cache according to the cache parameters defined 
       in [cache_param] *)
   val touch : t -> int64 -> NumAD.DS.rw_t -> t

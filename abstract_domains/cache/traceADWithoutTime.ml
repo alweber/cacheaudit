@@ -9,13 +9,6 @@ open NumAD.DS
 
 type cache_st = H | M | N | HM
 (* Hit, Miss, No access, Hit or Miss *)
-    
-let duration_H, duration_M, duration_N = 3,20,1
-
-let max_times = 10000000
-
-
-
 
 module Make (CA : CacheAD.S) = struct
   
@@ -43,14 +36,12 @@ module Make (CA : CacheAD.S) = struct
       Pervasives.compare (n1.value, n1.parent_UIDs) (n2.value,n2.parent_UIDs)
   end   
   
-	(*set of Tries*)
   and TrieSet : Set.S  with type elt = Trie.t
     = Set.Make(Trie)
 
   type t = {
     traces : Trie.t add_top;
     cache : CA.t;
-    times: IntSet.t add_top;
   }
   
   
@@ -123,7 +114,7 @@ module Make (CA : CacheAD.S) = struct
     node
     
   let init cache_param acc accd=
-    { traces = Nt root; cache = CA.init cache_param acc accd; times = Nt (IntSet.singleton 0)} 
+    { traces = Nt root; cache = CA.init cache_param acc accd} 
         
   let get_single_parent = function
     | Single p -> p
@@ -170,30 +161,21 @@ module Make (CA : CacheAD.S) = struct
         let parents = Couple (node1,node2) in 
         (* A dummy node whose parents are the nodes we are joining *)
         Nt (add_dummy parents)
-
-  let join_times times1 times2 = 
-    match times1,times2 with
-    | Nt tms1,Nt tms2 ->
-      let tms = IntSet.union tms1 tms2 in
-      if IntSet.cardinal tms < max_times then Nt tms else Tp
-    | _,_ -> Tp
   
   let join env1 env2 =
     let traces = join_traces env1.traces env2.traces in
     let cache = CA.join env1.cache env2.cache in
-    let times = join_times env1.times env2.times in
-    {traces = traces; cache = cache; times = times}
+     {traces = traces; cache = cache}
         
   let widen env1 env2 = 
     let cache = CA.widen env1.cache env2.cache in
     (* join_times goes to top at some point *)
-    let times = join_times env1.times env2.times in
     let traces = match env1.traces, env2.traces with
       | Nt node1, Nt node2 -> 
         if node1.Trie.node_UID = node2.Trie.node_UID then Nt node1
         else Tp 
     | _,_ -> Tp in
-    {cache = cache; traces = traces; times = times}
+    {cache = cache; traces = traces}
   
   let rec subseteq_traces trace1 trace2 =
     match trace1,trace2 with
@@ -212,14 +194,8 @@ module Make (CA : CacheAD.S) = struct
       else false
   
   let subseteq env1 env2 = 
-    let subeq_times = match env1.times,env2.times with
-    | Nt tms1,Nt tms2 -> IntSet.subset tms1 tms2
-    | _,Tp -> true
-    | _,_ -> false in 
     (CA.subseteq env1.cache env2.cache) &&
-    subeq_times &&
     subseteq_traces env1.traces env2.traces
-  
   
   let print fmt env =
     CA.print fmt env.cache;
@@ -229,15 +205,7 @@ module Make (CA : CacheAD.S) = struct
     | Nt node ->
       Format.fprintf fmt "%s, %f bits\n" 
         (string_of_big_int node.Trie.num_traces) 
-        (Utils.log2 node.Trie.num_traces);
-    Format.fprintf fmt "\n# times: ";
-    match env.times with 
-    | Tp -> Format.fprintf fmt "too imprecise to tell"
-    | Nt tms ->
-      let numtimes = float_of_int (IntSet.cardinal tms) in
-      Format.fprintf fmt "%f, %f bits\n" 
-        numtimes ((log10 numtimes)/.(log10 2.))
-      
+        (Utils.log2 node.Trie.num_traces)				      
 
     (* N.B. This way of counting traces*)
     (* does not consider possible Error-states; *)
@@ -252,21 +220,6 @@ module Make (CA : CacheAD.S) = struct
         | M -> "Miss"
         | HM -> "HorM"
         | N -> "None")
-  
-  let add_time time times = 
-    match times with 
-    | Tp -> Tp
-    | Nt tms -> Nt (IntSet.fold (fun x tms ->
-        IntSet.add (x + time) tms) tms IntSet.empty)
-  
-  let add_time_status status times = 
-    match status with
-    | H -> add_time duration_H times
-    | M -> add_time duration_M times
-    | N -> add_time duration_N times
-    | HM -> 
-      join_times (add_time duration_M times) (add_time duration_H times)
-  
   
   let touch env addr rw =
     let c_hit,c_miss = CA.touch_hm env.cache addr rw in
@@ -283,8 +236,7 @@ module Make (CA : CacheAD.S) = struct
     let status = if rw = Write && (status = H || status = HM) then M
       else status in
     let traces = add env.traces status in
-    let times = add_time_status status env.times in
-    {traces = traces; cache = cache; times = times}
+    {traces = traces; cache = cache}
 
   (* Hitmiss tracking for touch_hm *)
   let touch_hm env addr rw =
@@ -292,26 +244,22 @@ module Make (CA : CacheAD.S) = struct
     let nu_hit = match c_hit with
       | Nb c -> 
 	Nb {traces = add env.traces H;
-  	    cache = c ;
-  	    times = add_time_status H env.times}
+  	    cache = c}
       | Bot -> Bot
     in
     let nu_miss = match c_miss with
       | Nb c -> 
 	Nb {traces = add env.traces M; 
-	    cache = c ;
-  	    times = add_time_status M env.times}
+	    cache = c}
       | Bot -> Bot
     in (nu_hit,nu_miss)
 
 
   let elapse env time = 
-    let times = add_time time env.times in
     (* elapse is called after each instruction and adds an "N"-node; *)
     (* in the traces two consecutive N's will correspond to "no cache access"*)
     let traces = add env.traces N in
-    let times = add_time_status N times in
-    {env with times = times; traces = traces}
+    {env with traces = traces}
 
   let count_cache_states env = CA.count_cache_states env.cache 
 

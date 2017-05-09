@@ -5,7 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
- * Extended by: Goran Doychev, Boris Koepf, Laurent Mauborgne   
+ * Extended by: Goran Doychev, Boris Koepf, Laurent Mauborgne, Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -96,7 +96,7 @@ let rec read_instr_body bits seg_override =
       Arith (Add, dst, Reg (int_to_reg32 spare)), bits
   | 0x02 -> 
       let src, bits, spare = read_rm8_with_spare bits seg_override in
-      Arithb (Add, src, Reg (int_to_reg8 spare)), bits
+      Arithb (Add, Reg (int_to_reg8 spare), src), bits
   | 0x03 ->
       let src, bits, spare = read_rm32_with_spare bits seg_override in
       Arith (Add, Reg (int_to_reg32 spare), src), bits
@@ -106,11 +106,23 @@ let rec read_instr_body bits seg_override =
   | 0x05 -> 
     let imm, bits = read_uint32 bits 32 in
     Arith(Add, Reg EAX, Imm imm), bits
+	| 0x07 -> 
+		Pop (Reg (int_to_reg32 (segment_reg_to_int ES))), bits
+	| 0x08 -> 
+      let dst, bits, spare = read_rm8_with_spare bits seg_override in
+      Arithb (Or, dst, Reg (int_to_reg8 spare)), bits
   | 0x09 -> arith_to_rm Or
   | 0x0B -> arith_from_rm Or
   | 0x0D ->
         let imm, bits = read_uint32 bits 32 in
         Arith(Or, Reg EAX, Imm imm), bits
+	| 0x11 -> 
+      let dst, bits, spare = read_rm32_with_spare bits seg_override in
+      Arith (Addc, dst, Reg (int_to_reg32 spare)), bits
+	| 0x18 -> 
+		let dst, bits, spare = read_rm8_with_spare bits seg_override in
+    Arithb (Subb, dst, Reg (int_to_reg8 spare)), bits
+  | 0x19 -> arith_to_rm Subb
   | 0x1C -> let imm, bits = read_uint32 bits 8 in
         Arithb(Subb, Reg AL, Imm imm), bits
   | 0x21 -> arith_to_rm And
@@ -121,6 +133,12 @@ let rec read_instr_body bits seg_override =
   | 0x2B -> arith_from_rm Sub
   | 0x2C -> let imm, bits = read_uint32 bits 8 in
         Arithb(Sub, Reg AL, Imm imm), bits
+  | 0x2D -> let imm, bits = read_uint32 bits 32 in
+        Arith(Sub, Reg EAX, Imm imm), bits
+	| 0x30 -> 
+		let dst, bits, spare = read_rm8_with_spare bits seg_override in
+		let src = Reg (int_to_reg8 spare) in
+		Arithb(Xor, dst, src),bits
   | 0x31 -> arith_to_rm Xor
   | 0x33 -> arith_from_rm Xor
   | 0x34 -> let imm, bits = read_uint32 bits 8 in
@@ -134,6 +152,9 @@ let rec read_instr_body bits seg_override =
   | 0x3B ->
       let src, bits, spare = read_rm32_with_spare bits seg_override in
       Cmp(Reg(int_to_reg32 spare), src), bits
+	| 0x3C ->
+      let imm, bits = read_uint32 bits 8 in
+			Cmpb(Reg AL, Imm imm), bits
   | 0x3D ->
       let disp, bits = read_int32 bits 32 in
       Cmp (Reg EAX, Imm disp), bits
@@ -162,6 +183,9 @@ let rec read_instr_body bits seg_override =
       let disp, bits = read_int32 bits 8 in
         let aop = int_to_arith_op spare in
         Arith (aop, dst, Imm disp), bits
+	| 0x84 ->    (* test *)
+			let dst, bits, spare = read_rm8_with_spare bits seg_override in			
+			Testb(dst, Reg(int_to_reg8 spare)), bits
   | 0x85 ->
       let dst, bits, spare = read_rm32_with_spare bits seg_override in
       Test(dst, Reg(int_to_reg32 spare)), bits
@@ -197,6 +221,9 @@ let rec read_instr_body bits seg_override =
   | 0xA3 ->
       let imm, bits = read_uint32 bits 32 in
       Mov (Address {addrDisp = imm; addrBase = None; addrIndex = None; segBase = None}, Reg EAX), bits
+  | 0xA9 -> 
+			let imm, bits = read_uint32 bits 32 in
+      Test (Reg EAX, Imm imm), bits
   | 0xC1 -> shift (fun bits ->
       let imm, bits = read_uint32 bits 8 in
       Imm imm, bits)
@@ -235,11 +262,20 @@ let rec read_instr_body bits seg_override =
       let imm, bits = read_int32 bits 8 in
       Jmp (Imm(Int64.add (Int64.of_int (!file_base_offset + loc)) imm)), bits
   | 0xF4 -> Halt, bits
+	| 0xF6 -> 
+			let dst, bits, spare = read_rm32_with_spare bits seg_override in
+			begin match spare with
+			| 0 ->
+  			let imm, bits = read_uint32 bits 8 in
+  			Test(dst, Imm imm), bits 
+			| _ -> raise (Parse (Printf.sprintf "Unknown 0xF6 instruction 0x%x at position 0x%x" spare position))
+			end
   | 0xF7 -> 
       let gop, bits, spare = read_rm32_with_spare bits seg_override in
       begin match spare with
-      (* | 6 -> Div gop, bits *)
-      | 2 -> Arith(Xor, gop, Imm 0xFFFFFFFFL), bits
+			| 6 -> 
+				Div (EDX, EAX, gop), bits
+      | 2 -> Not gop, bits
       | _ -> raise (Parse (Printf.sprintf "Unknown 0xF7 instruction 0x%x at position 0x%x" spare position))
       end
   (* | 0xF9 -> FlagSet(CF, true), bits *)
@@ -264,6 +300,39 @@ let rec read_instr_body bits seg_override =
         let src,bits,_ = read_rm8_with_spare bits seg_override in
         Set (int_to_cc (opc - 0x90), src),bits
       else begin match opc with
+			| 0x48 ->
+				let src, bits, spare = read_rm32_with_spare bits seg_override in
+					let _,_ = read_uint bits 8 in (* throw away first byte *)	
+					Cmov (int_to_cc (opc - 0x40), Reg (int_to_reg32 spare), src), bits
+				
+			| 0xA4 -> (* reg_mem $v, reg $v$, imm 8 *)
+			(* 1st operand: register to be shifted*)
+			(* 2nd operand: bit pattern to be shifted in*)
+			(* 3rd operand: offset by which to shift (as immediate)*)
+				(* assumption: read_rm32_with_spare returns the first operand, the *)
+				(* remaining bit string and the second operand*)
+				let sregmem, bits, patternreg = read_rm32_with_spare bits seg_override in
+				(* assumption: read_uint32 returns the third operand*)
+  	      let offset, bits = read_uint32 bits 8 in	
+						Shld (sregmem, Reg (int_to_reg32 patternreg), Imm offset), bits			
+
+			| 0xA5 -> (* reg_mem $v, reg $v$, rcx 8 *)
+			(* 1st operand: register to be shifted*)
+			(* 2nd operand: bit pattern to be shifted in*)
+			(* There is no third operand. The offset is read from register CL*)	
+				(* assumption: read_rm32_with_spare returns the first operand, the *)
+				(* remaining bit string and the second operand*)
+				let sregmem, bits, patternreg = read_rm32_with_spare bits seg_override in			
+					Shld (sregmem, Reg (int_to_reg32 patternreg), Reg CL), bits
+		
+			| 0xAC -> (* reg_mem $v, reg $v$, imm 8 *)
+				let sregmem, bits, patternreg = read_rm32_with_spare bits seg_override in
+  	      let offset, bits = read_uint32 bits 8 in	
+						Shrd (sregmem, Reg (int_to_reg32 patternreg), Imm offset), bits				
+							
+			| 0xAD -> (* reg_mem $v, reg $v$, rcx 8 *)		
+				let sregmem, bits, patternreg = read_rm32_with_spare bits seg_override in			
+					Shrd (sregmem, Reg (int_to_reg32 patternreg), Reg CL), bits
       | 0xAF -> 
         let src, bits, dst = read_rm32_with_spare bits seg_override in
         Imul ((int_to_reg32 dst), src, None), bits

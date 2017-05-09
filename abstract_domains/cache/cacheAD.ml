@@ -23,7 +23,7 @@ type cache_param = {
 
 module type S = sig
   include AD.S
-  val init : cache_param -> t
+  val init : cache_param -> bool -> bool -> t
   (** initialize an empty cache
    takes arguments cache_size (in bytes), 
   line_size (in bytes) and associativity *)
@@ -46,6 +46,10 @@ end
 let do_concrete_miss = ref false
 let do_concrete_hit = ref false
 
+(*parameters for selecting acc and/or accd*)
+let do_acc = ref false
+let do_accd = ref false
+
 (* if do_concrete_miss is false, the following flag determines whether to *)
 (* perform a reduction which removes impossible states with "holes" *)
 let do_reduction = ref true
@@ -53,6 +57,7 @@ let do_reduction = ref true
 type adversay = Blurred | SharedSpace
 
 let adversary = ref Blurred
+
 
 module Make (A: AgeAD.S) = struct
   (*** Permutations corresponding to replacement strategies ***)
@@ -137,11 +142,14 @@ module Make (A: AgeAD.S) = struct
   let get_set_addr env addr =
     calc_set_addr env.num_sets addr
     
-  let init cache_param =
+  let init cache_param acc accd=
     if cache_param.opt_precision then begin
         do_concrete_miss := true;
         do_concrete_hit := true
       end;
+			(*turn on counting for acc/accd*)
+		if acc then do_acc := true else do_acc := false;
+		if accd then do_accd := true else do_accd := false;
     let (cs,ls,ass,strategy) = (cache_param.cs, cache_param.ls,
       cache_param.ass,cache_param.str) in
     let ns = cs / ls / ass in (* number of sets *)
@@ -217,38 +225,57 @@ module Make (A: AgeAD.S) = struct
   
   (*** Counting valid states ***)
   
-  (* Computes two lists where each item i is the number of possible *)
-  (* cache states of cache set i for a shared-memory *)
-  (* and the disjoint-memory (blurred) adversary *)
-  let cache_states_per_set env =
+
+  let blurred_cache_states_per_set env =
     let cache_sets = Utils.partition (A.var_names env.ages) (get_set_addr env) in
-    IntMap.fold (fun set_num addr_set (nums,bl_nums) ->
+    IntMap.fold (fun set_num addr_set (bl_nums) ->
         (* concretize *)
         let concr = concretize_set env addr_set in
         (* remove impossible *)
         let concr = List.filter (is_poss_state env) concr in
-        let num_concr = List.length concr in
-        let num_disjoint = IntSetSet.cardinal (
+        (*counting for blurred*)
+				let num_disjoint = 
+					(if !do_accd then 
+					IntSetSet.cardinal (
             List.fold_left (fun set state -> 
               IntSetSet.add (fst (get_state_ages env state)) set) IntSetSet.empty concr
-          ) in
-        ((Int64.of_int num_concr)::nums, (Int64.of_int num_disjoint)::bl_nums)
-      ) cache_sets ([],[])
-      
-  let count_cstates env = 
-    let nums_cstates,bl_nums_cstates = cache_states_per_set env in
-      (Utils.prod nums_cstates,Utils.prod bl_nums_cstates)
-      
+          ) 
+					else 0)					
+					in
+        (Int64.of_int num_disjoint)::bl_nums)
+       cache_sets ([])
+			
+			
+			
+  let nonblurred_cache_states_per_set env =
+    let cache_sets = Utils.partition (A.var_names env.ages) (get_set_addr env) in
+    IntMap.fold (fun set_num addr_set (nums) ->
+        (* concretize *)
+        let concr = concretize_set env addr_set in
+        (* remove impossible *)
+        let concr = List.filter (is_poss_state env) concr in
+        (*counting for non-blurred*)
+				let num_concr = 
+					(if !do_acc then 
+					List.length concr 
+					else 0)
+					in
+        ((Int64.of_int num_concr)::nums)
+      ) cache_sets ([])
+			
+  
+  let blurred_count_cstates env =  Utils.prod (blurred_cache_states_per_set env)
+					    
+  let nonblurred_count_cstates env = Utils.prod (nonblurred_cache_states_per_set env)
       
   (*** Printing ***)
   
   let print_addr_set fmt = NumSet.iter (fun a -> Format.fprintf fmt "%Lx " a)
 
   let count_cache_states env = 
-    let num_cstates,bl_num_cstates = count_cstates env in
     match !adversary with
-    | Blurred -> bl_num_cstates
-    | SharedSpace -> num_cstates
+    | Blurred -> blurred_count_cstates env
+    | SharedSpace -> nonblurred_count_cstates env
   
   (* [print num] prints [num], which should be positive, as well as how many
      bits it is. If [num <= 0], print an error message *)
@@ -278,11 +305,14 @@ module Make (A: AgeAD.S) = struct
           end
         ) env.cache_sets;
     Format.printf "\n";
-    let num, bl_num = count_cstates env in
+		if !do_acc then begin
     Format.fprintf fmt "\nNumber of valid cache configurations: ";
-    print_num fmt num;
-    Format.fprintf fmt "\nNumber of valid cache configurations (blurred): ";
-    print_num fmt bl_num
+    print_num fmt (nonblurred_count_cstates env)
+		end;
+		if !do_accd then begin
+ 		  Format.fprintf fmt "\nNumber of valid cache configurations (blurred): ";
+ 		  print_num fmt (blurred_count_cstates env)
+		end
   
     let print_delta c1 fmt c2 = match get_log_level CacheLL with
     | Debug->

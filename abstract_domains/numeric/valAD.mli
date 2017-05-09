@@ -69,7 +69,13 @@ module type S = sig
       Returns
       one environment per value combination of CF and ZF. *)
   val update_val : t -> flags_t -> var -> mask -> cons_var -> mask -> 
-    AbstrInstr.abstr_op -> int64 option -> t FlagMap.t 
+    AbstrInstr.abstr_op -> int64 option -> bool option-> t FlagMap.t 
+		
+	(** version of [update_val] which updates two destination variables. Currently it
+	is used for division which stores the result in one variable and the remainder in 
+	another variable.*)
+  val update_val_twodst : t -> flags_t -> var -> mask ->  var -> mask -> cons_var -> mask -> 
+    AbstrInstr.abstr_op -> t FlagMap.t 				
   (* This interface should be changed to allow flags as argument and
       return a tree *)
   (** [updval_set env flags dst mask op] performs a Set-instruction *)
