@@ -11,7 +11,8 @@ type abstr_op = Aarith of X86Types.arith_op | Amov | Aexchg
 	| AShld  | AShrd 
 	| Ashift of X86Types.shift_op | Aflag of flag_op
   | Aimul | Aset
-	| Adiv | Anot | Acmov of X86Types.cc
+	| Adiv | Aimullong | Amullong | Anot | Acmov of X86Types.cc
+  | Acdq | Absr
 
 type stack_op = Apop | Apush
 

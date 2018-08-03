@@ -5,7 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
- * Extended by: Goran Doychev, Boris Koepf, Laurent Mauborgne, Alexandra Weber   
+ * Extended by: Goran Doychev, Boris Koepf, Laurent Mauborgne, Johannes Schickel, Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -119,10 +119,16 @@ let rec read_instr_body bits seg_override =
 	| 0x11 -> 
       let dst, bits, spare = read_rm32_with_spare bits seg_override in
       Arith (Addc, dst, Reg (int_to_reg32 spare)), bits
+	| 0x13 -> 
+		  let src, bits, spare = read_rm32_with_spare bits seg_override in
+      Arith (Addc, Reg (int_to_reg32 spare), src), bits		
 	| 0x18 -> 
 		let dst, bits, spare = read_rm8_with_spare bits seg_override in
     Arithb (Subb, dst, Reg (int_to_reg8 spare)), bits
   | 0x19 -> arith_to_rm Subb
+	| 0x1B ->
+		let src, bits, spare = read_rm32_with_spare bits seg_override in
+   	 Arith (Subb, Reg (int_to_reg32 spare), src), bits
   | 0x1C -> let imm, bits = read_uint32 bits 8 in
         Arithb(Subb, Reg AL, Imm imm), bits
   | 0x21 -> arith_to_rm And
@@ -168,6 +174,10 @@ let rec read_instr_body bits seg_override =
   | 0x6A ->
       let imm, bits = read_uint32 bits 8 in
       Push (Imm imm), bits
+  | 0x6B -> 
+    let src, bits, dst = read_rm32_with_spare bits seg_override in
+    let imm, bits = read_int32 bits 8 in
+      Imul ((int_to_reg32 dst), src, Some imm), bits				
   | 0x80 ->
       let dst, bits, spare = read_rm8_with_spare bits seg_override in
       let aop = int_to_arith_op spare in
@@ -208,6 +218,7 @@ let rec read_instr_body bits seg_override =
       | _ -> raise (Parse "Weird LEA operand")
       end
   | 0x90 -> Skip, bits
+  | 0x99 -> Cdq, bits
   | 0xA0 ->
       let imm, bits = read_uint32 bits 32 in
       Movb (Reg AL, Address {addrDisp = imm; addrBase = None; addrIndex = None; segBase = None}), bits
@@ -276,6 +287,9 @@ let rec read_instr_body bits seg_override =
 			| 6 -> 
 				Div (EDX, EAX, gop), bits
       | 2 -> Not gop, bits
+			| 3 -> Arith(Neg, gop, Imm 0x00000000L), bits (* Reusing Sub is not possible because Sub treats the first operand as destination and substracts the second operand from it*)
+      | 4 (*100*)->  MulLong (EDX, EAX, gop), bits 
+      | 5 (*101*)->  ImulLong (EDX, EAX, gop), bits 
       | _ -> raise (Parse (Printf.sprintf "Unknown 0xF7 instruction 0x%x at position 0x%x" spare position))
       end
   (* | 0xF9 -> FlagSet(CF, true), bits *)
@@ -340,6 +354,10 @@ let rec read_instr_body bits seg_override =
         let _,_ = read_uint bits 8 in (* throw away first byte *)
         let src,bits,spare = read_rm8_with_spare bits seg_override in
           Movzx (Reg (int_to_reg32 spare),src),bits
+			| 0xBD ->
+				
+	   	 let src, bits, spare = read_rm32_with_spare bits seg_override in
+    			Bsr ((int_to_reg32 spare), src), bits				
       | _ -> raise (Parse (Printf.sprintf "Unknown 0x0F instruction 0x%x at position 0x%x" opc position))
       end
   | _ -> raise (Parse (Printf.sprintf "Unknown instruction 0x%x at position 0x%x" byte position))

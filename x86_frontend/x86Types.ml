@@ -5,7 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
- * Extended by: Alexandra Weber   
+ * Extended by: Johannes Schickel, Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -227,6 +227,7 @@ type arith_op =
   | Xor
 	| Inc
 	| Dec
+	| Neg
 
 
 (** Bitwise shift operations *)
@@ -254,6 +255,8 @@ type instr =
   | Jmp of op32
   | Lea of reg32 * address
   | Imul of reg32 * op32 * int64 option
+	| ImulLong of reg32 * reg32 * op32
+	| MulLong of reg32 * reg32 * op32
 	| Div of reg32 * reg32 * op32
   | Leave
   | Mov of op32 * op32
@@ -270,5 +273,7 @@ type instr =
   | Skip
 	| Shld of op32 * op32 * op8
 	| Shrd of op32 * op32 * op8
+  | Cdq
+	| Bsr of reg32 * op32
   (* | FlagSet of flag*bool (*sets the flag to the bool value *) *)
 

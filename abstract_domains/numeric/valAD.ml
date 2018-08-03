@@ -653,6 +653,7 @@ module Make (O : VALADOPT) =
       | Xor -> Int64.logxor
 			| Inc -> Int64.add
 			| Dec -> Int64.sub
+			| Neg ->  (fun x y -> Int64.sub y x)
       
     let make_set_from_list =
       List.fold_left (fun s x -> NumSet.add x s) NumSet.empty
@@ -762,7 +763,7 @@ module Make (O : VALADOPT) =
       let retmap = FlagMap.empty in (* Interval after operation *)
       let inter =
         match aop with
-        | Add | Addc | Sub | Subb ->
+        | Add | Addc | Sub | Subb | Neg->
             interval_operation oper dst_vals src_vals
         | And | Or | Xor ->
             (match aop with
@@ -781,7 +782,7 @@ module Make (O : VALADOPT) =
 					| And | Or | Xor ->		
 						(FlagMap.add { cf = false; zf = true; sf = false; o_f = false; } z
               retmap)						
-					| Add | Addc | Sub | Subb ->	
+					| Add | Addc | Sub | Subb | Neg ->	
 						(FlagMap.add { cf = false; zf = true; sf = true; o_f = false; } z					
 						(FlagMap.add { cf = false; zf = true; sf = false; o_f = false; } z
 						(FlagMap.add { cf = false; zf = true; sf = false; o_f = true; } z
@@ -801,7 +802,7 @@ module Make (O : VALADOPT) =
 					FlagMap.add { cf = false; zf = false; sf = true; o_f = false; } n 				
 					(FlagMap.add { cf = false; zf = false; sf = false; o_f = false; }  					
               n retmap)						
-					| Add | Addc | Sub | Subb ->							
+					| Add | Addc | Sub | Subb | Neg->							
 					FlagMap.add { cf = false; zf = false; sf = true; o_f = false; } n 
 					(FlagMap.add { cf = false; zf = false; sf = false; o_f = true; } n 					
 					(FlagMap.add { cf = false; zf = false; sf = false; o_f = false; } n 					
@@ -857,7 +858,7 @@ module Make (O : VALADOPT) =
                      { cf = true; zf = false; sf = false; o_f = true; }
                      (mapt modulo_add o) retmap)))
                | (_, _) -> retmap)
-        | Sub | Subb ->
+        | Sub | Subb | Neg ->
             let meetUnder =
               var_meet_ab inter
                 (Interval ((Int64.sub 1L two32),(Int64.pred min_elt)))
@@ -924,6 +925,10 @@ module Make (O : VALADOPT) =
 										| Xor | And | Or ->
                         perform_op oper dset sset is_cf_logic is_zf_logic_32 is_sf_logic_32
                           is_of_logic
+										| Neg -> 			
+                        perform_op oper dset sset is_cf is_zf is_sf (fun dst src res -> is_of src dst res)
+												 (*Negation is implemented by substrating from dst from src. *)
+												(* Hence, dst and src must be passed to is_of in reverse order.*)
           					 | Addc | Add ->
                         perform_op oper dset sset is_cf is_zf is_sf is_of
 										 | Subb | Sub ->
@@ -1135,10 +1140,156 @@ module Make (O : VALADOPT) =
           let top_env = VarMap.add dst2var top (VarMap.add dst1var top env)
           in FlagMap.singleton flgs_init top_env
 	
+		let signextend_32_to_64 val32 = if Int64.logand (Int64.shift_right_logical val32 31) 0x1L <> 0L then (Int64.logor 0XFFFFFFFF00000000L val32) else val32					
+    let zeroextend_32_to_64 val32 = Int64.logand val32 0xFFFFFFFFL
+										
+    let mulimullong env flgs_init dst1var dst1vals dst1mask dst2var dst2vals dst2mask
+            svar svals smask signed =
+			if (smask <> NoMask || dst1mask <> NoMask || dst2mask <> NoMask)
+		  then failwith "Imul to two destinations is only supported for 32b."
+			else
+      match (dst1vals, dst2vals, svals) with
+      | (FSet d1set, FSet d2set, FSet sset) ->
+				   (*combine the results for each value of s*)
+            let compute_op_s d1val d2val sset =
+              NumSet.fold
+                (fun sval (d1map, d2map, smap) ->		
+									let op1 = if signed then signextend_32_to_64 sval else zeroextend_32_to_64 sval in
+									let op2 = if signed then signextend_32_to_64 d2val else zeroextend_32_to_64 d2val in									
+									let result = Int64.mul op1 op2 in
+									let lower = Int64.logand result 0xFFFFFFFFL in
+									let upper = Int64.shift_right_logical (Int64.logand result 0xFFFFFFFF00000000L) 32 in													
+                  let new_cfof  =
+                    let sign_lower = ((Int64.shift_right_logical (Int64.logand result 0xFFFFFFFFL) 31) <> 0L) in
+						        let res_upper = (Int64.logand (Int64.shift_right_logical result 32) 0xFFFFFFFFL) in
+					        	if signed && sign_lower then (res_upper <> 0xFFFFFFFFL)
+				         		else (res_upper <> 0L) 
+										in
+
+									(*SF and ZF are undefined*)
+									let flags1 = {cf = new_cfof; o_f = new_cfof; sf = true; zf = true} in
+									let flags2 = {cf = new_cfof; o_f = new_cfof; sf = true; zf = false} in
+									let flags3 = {cf = new_cfof; o_f = new_cfof; sf = false; zf = true} in
+									let flags4 = {cf = new_cfof; o_f = new_cfof; sf = false; zf = false} in
+
+								   (*the upper part of the result is written to the first destination variable*)
+                   let d1vals = fmap_find_with_defval flgs_init NumSet.empty d1map in
+ 							     let dest1map =
+											 FlagMap.add flags4 (NumSet.add upper d1vals) 
+											 (FlagMap.add flags3 (NumSet.add upper d1vals) 											
+											 (FlagMap.add flags2 (NumSet.add upper d1vals) 											
+											 (FlagMap.add flags1 (NumSet.add upper d1vals) smap))) in
+									 (*the lower part of the result is written to the second destination variable*)									
+    							 let d2vals = fmap_find_with_defval flgs_init NumSet.empty d2map in
+     							 let dest2map = 
+											 FlagMap.add flags4 (NumSet.add lower d2vals)
+											 (FlagMap.add flags3 (NumSet.add lower d2vals)											
+											 (FlagMap.add flags2 (NumSet.add lower d2vals) 	
+											 (FlagMap.add flags1 (NumSet.add lower d2vals) d2map))) in
+   								 let svals = fmap_find_with_defval flgs_init NumSet.empty smap in
+   								 let sourcemap = 
+											 FlagMap.add flags4 (NumSet.add sval svals) 
+											 (FlagMap.add flags3 (NumSet.add sval svals) 									
+											 (FlagMap.add flags2 (NumSet.add sval svals) 	
+											 (FlagMap.add flags1 (NumSet.add sval svals) smap)))
+     							 in (dest1map, dest2map, sourcemap)	
+								)
+                sset (FlagMap.empty, FlagMap.empty, FlagMap.empty) in								
+            (*combine the results for each value of the d2*)
+            let compute_op_d2 d1val d2set sset =
+              NumSet.fold
+                (fun d2val (new_d1, new_d2, new_s) ->
+                   let (d1vals, d2vals, svals) = compute_op_s d1val d2val sset
+                   in
+                     ((fmap_combine d1vals new_d1 NumSet.union),
+                      (fmap_combine d2vals new_d2 NumSet.union),
+                      (fmap_combine svals new_s NumSet.union)))
+                d2set (FlagMap.empty, FlagMap.empty, FlagMap.empty) in
+					  (*combine the results for each value of d1*)
+            let (d1map, d2map, smap) =
+              NumSet.fold
+                (fun d1val (new_d1, new_d2, new_s) ->
+                   let (d1vals, d2vals, svals) = compute_op_d2 d1val d2set sset
+                   in
+                     ((fmap_combine d1vals new_d1 NumSet.union),
+                      (fmap_combine d2vals new_d2 NumSet.union),
+                      (fmap_combine svals new_s NumSet.union)))
+                d1set (FlagMap.empty, FlagMap.empty, FlagMap.empty) in
+            (*maps from flag combinations to possible values*)
+            (*Convert sets to intervals if they are too large*)
+            let d1map =
+              FlagMap.map (fun nums -> lift_to_interval nums) d1map in
+            let d2map =
+              FlagMap.map (fun nums -> lift_to_interval nums) d2map in
+            let smap =
+              FlagMap.map (fun nums -> lift_to_interval nums) smap in
+							
+            (*return the flag map which maps the flag combinations to the valueADs with the values of d1, d2 and*)
+            (* s from which the flag combination can result. If the s was an immediate, it is discarded.*)
+            let new_flag_env =
+              FlagMap.mapi
+                (fun flgs d1vals ->
+                   let env =
+										(match svar with
+            				 | VarOp var -> VarMap.add var (FlagMap.find flgs smap) env
+            				 | Cons _ -> env) in
+                   let env =
+                     VarMap.add dst2var (FlagMap.find flgs d2map) env                   
+                   in VarMap.add dst1var d1vals env)
+                d1map
+            in
+              new_flag_env				
+				
+     
+      | (_, _, _) -> 
+          let top_env = VarMap.add dst2var top (VarMap.add dst1var top env)
+          in (*CF and OF are set to the same value*)
+					let fm = FlagMap.singleton {cf = true; o_f = true; sf = true; zf = true} top_env in
+					let fm = FlagMap.add {cf = true; o_f = true; sf = true; zf = false} top_env fm in
+				  let fm = FlagMap.add {cf = true; o_f = true; sf = false; zf = true} top_env fm in
+					let fm = FlagMap.add {cf = true; o_f = true; sf = false; zf = false} top_env fm in
+					let fm = FlagMap.add {cf = false; o_f = false; sf = true; zf = true} top_env fm in
+					let fm = FlagMap.add {cf = false; o_f = false; sf = true; zf = false} top_env fm in
+					let fm = FlagMap.add {cf = false; o_f = false; sf = false; zf = true} top_env fm in
+					FlagMap.add {cf = false; o_f = false; sf = false; zf = false} top_env fm	
+				
+					
+
+    let cdq env flags dstvar dvals srcvar svals =
+      let env_clear = FlagMap.singleton flags (VarMap.add dstvar (FSet (NumSet.singleton 0x00000000L)) env) in
+      let env_set   = FlagMap.singleton flags (VarMap.add dstvar (FSet (NumSet.singleton 0xFFFFFFFFL)) env) in
+      let env_both  = fmap_combine env_clear env_set join in
+      match (dvals, svals) with
+      | (_, FSet sset) ->
+          let exists_pos, exists_neg =
+            NumSet.fold (fun value (exists_pos, exists_neg) ->
+                if (Int64.logand value 0x80000000L <> 0L)
+                then (exists_pos, true)
+                else (true, exists_neg)
+              ) sset (false, false) in
+          (* For the time being we simply return either all bits set or all cleared. *)
+          (match (exists_pos, exists_neg) with
+           | (true,  true)  -> env_both
+           | (true,  false) -> env_clear
+           | (false, true)  -> env_set
+           | (false, false) -> failwith "valAD: cdq: neither positive nor negative in set case")
+      | (_, _) ->
+          (* For the time being we simply return either all bits set or all cleared. *)
+          env_both
     (* interval_flag_test takes two intervals and a flag combination and returns
      * the corresponding intervals *)
     let interval_flag_test env arith_op dstvar dvals srcvar svals =
-   		if arith_op <> Sub then failwith "interval_flag_test: TEST instruction for intervals not implemented";
+      match arith_op with
+      | And ->
+          (* TODO: There is room for precision improvements here. For example,
+                   when the sign is not set for both dvals and svals, there is
+                   no possibility of sign flag being set. *)
+          let flgs1 = { cf = false; zf = false; sf = false; o_f = false; } in
+          let flgs2 = { cf = false; zf = true;  sf = false; o_f = false; } in
+          let flgs3 = { cf = false; zf = false; sf = true;  o_f = false; } in
+          ((FlagMap.add flgs3 dvals (FlagMap.add flgs2 dvals (FlagMap.add flgs1 dvals FlagMap.empty))),
+           (FlagMap.add flgs3 svals (FlagMap.add flgs2 svals (FlagMap.add flgs1 svals FlagMap.empty))))
+      | Sub ->
       let (dvals, svals) = ((to_interval dvals), (to_interval svals)) in
       let (dl, dh) = get_bounds dvals in
       let (sl, sh) = get_bounds svals in
@@ -1192,6 +1343,8 @@ module Make (O : VALADOPT) =
 									(FlagMap.add flgs1 z dstmap))),							
 								 FlagMap.add flgs4 z (FlagMap.add flgs3 z (FlagMap.add flgs2 z
 									(FlagMap.add flgs1 z dstmap)))))
+      | _ ->
+          failwith "valAD: TEST/CMP with unexpected arithmetic operation in interval case."
        
     (* perform TEST or CMP *)
     let test_cmp env flags fop dstvar dvals dmask srcvar svals smask =
@@ -1485,6 +1638,117 @@ module Make (O : VALADOPT) =
       in (shiftmap, patternmap, offsetmap)
       
 
+	let bsr env flags dstvar dvals mkvar srcvar svals mkcvar =
+		match (mkvar, mkcvar) with
+		| NoMask, NoMask ->
+				(match (dvals, svals) with
+					| FSet dvalset, FSet svalset ->
+							let compute_op dst =
+								NumSet.fold
+									(fun src (smap, rmap) ->
+										(*Implementation based on "Formal Specification of the x86
+											Instruction Set Architecture" by Ulan Degenbaev*)
+												let num_leading_zeroes =
+													if (Int64.logand src 0xFFFF0000L) <> 0L
+													then (*first 0 in first half of bitstring*)
+														(if (Int64.logand src 0xFF000000L) <> 0L
+															then 	(*first 0 in first byte*)
+															(if (Int64.logand src 0xF0000000L) <> 0L
+																then (*first 0 in 1st half of first byte*)
+																(if (Int64.logand src 0x80000000L) <> 0L then 0
+																	else (if (Int64.logand src 0x40000000L) <> 0L then 1
+																		else (if (Int64.logand src 0x20000000L) <> 0L then 2
+																			else (if (Int64.logand src 0x10000000L) <> 0L then 3 else 4)
+																		)))
+																else (*first 0 in 2nd half of first byte*) 4 +
+																(if (Int64.logand src 0x8000000L) <> 0L then 0
+																	else (if (Int64.logand src 0x4000000L) <> 0L then 1
+																		else (if (Int64.logand src 0x2000000L) <> 0L then 2
+																			else (if (Int64.logand src 0x1000000L) <> 0L then 3 else 4)
+																		))))
+															else (*first 0 in second byte*) 8 +
+															(if (Int64.logand src 0x00F00000L) <> 0L
+																then (*first 0 in 1st half of second byte*)
+																(if (Int64.logand src 0x800000L) <> 0L then 0
+																	else (if (Int64.logand src 0x400000L) <> 0L then 1
+																		else (if (Int64.logand src 0x200000L) <> 0L then 2
+																			else (if (Int64.logand src 0x100000L) <> 0L then 3 else 4)
+																		)))
+																else (*first 0 in 2nd half of second byte*) 4 +
+																(if (Int64.logand src 0x80000L) <> 0L then 0
+																	else (if (Int64.logand src 0x40000L) <> 0L then 1
+																		else (if (Int64.logand src 0x20000L) <> 0L then 2
+																			else (if (Int64.logand src 0x10000L) <> 0L then 3 else 4)
+																		)))))
+													else (*first 0 in second half of bitstring*) 16 +
+													(if (Int64.logand src 0x0000FF00L) <> 0L
+														then 	(*first 0 in third byte*)
+														(if (Int64.logand src 0x0000F000L) <> 0L
+															then (*first 0 in 1st half of third byte*)
+															(if (Int64.logand src 0x8000L) <> 0L then 0
+																else (if (Int64.logand src 0x4000L) <> 0L then 1
+																	else (if (Int64.logand src 0x2000L) <> 0L then 2
+																		else (if (Int64.logand src 0x1000L) <> 0L then 3 else 4)
+																	)))
+															else (*first 0 in 2nd half of third byte*) 4 +
+															(if (Int64.logand src 0x800L) <> 0L then 0
+																else (if (Int64.logand src 0x400L) <> 0L then 1
+																	else (if (Int64.logand src 0x200L) <> 0L then 2
+																		else (if (Int64.logand src 0x100L) <> 0L then 3 else 4)
+																	))))
+														else (*first 0 in fourth byte*) 8 +
+														(if (Int64.logand src 0x000000F0L) <> 0L
+															then (*first 0 in 1st half of fourth byte*)
+															(if (Int64.logand src 0x80L) <> 0L then 0
+																else (if (Int64.logand src 0x40L) <> 0L then 1
+																	else (if (Int64.logand src 0x20L) <> 0L then 2
+																		else (if (Int64.logand src 0x10L) <> 0L then 3 else 4)
+																	)))
+															else (*first 0 in 2nd half of fourth byte*) 4 +
+															(if (Int64.logand src 0x8L) <> 0L then 0
+																else (if (Int64.logand src 0x4L) <> 0L then 1
+																	else (if (Int64.logand src 0x2L) <> 0L then 2
+																		else (if (Int64.logand src 0x1L) <> 0L then 3 else 4)
+																	))))) in
+												let index_first_one = 32 - num_leading_zeroes in
+												let result = if (truncate 32 src) <> 0L then (Int64.of_int index_first_one) else dst in
+												let flags =
+													{
+														cf = flags.cf;
+														zf = is_zf src;
+														sf = flags.sf;
+														o_f = flags.o_f;
+													} in
+												let svals = fmap_find_with_defval flags NumSet.empty smap in
+												let srcmap = FlagMap.add flags (NumSet.add src svals) smap in
+												let rvals = fmap_find_with_defval flags NumSet.empty rmap in
+												let resmap =
+													FlagMap.add flags (NumSet.add (truncate 32 result) rvals) rmap
+												in (srcmap, resmap)
+									)
+									svalset (FlagMap.empty, FlagMap.empty) in
+							let (srcmap, resmap) =
+								NumSet.fold
+									(fun dst (new_s, new_r) ->
+												let (srcvals, resvals) = compute_op dst
+												in
+												((fmap_combine srcvals new_s NumSet.union),
+													(fmap_combine resvals new_r NumSet.union)))
+									dvalset (FlagMap.empty, FlagMap.empty) in
+							let srcmap = FlagMap.map (fun nums -> lift_to_interval nums) srcmap in
+							let resmap = FlagMap.map (fun nums -> lift_to_interval nums) resmap
+							in store_vals env dstvar resmap srcvar srcmap
+					
+					| (_, _) ->
+							let top_env = VarMap.add dstvar top env in
+							let fm =
+								FlagMap.singleton
+									{ cf = flags.cf; zf = true; sf = flags.sf; o_f = flags.o_f; }
+									top_env in
+							FlagMap.add
+								{ cf = flags.cf; zf = false; sf = flags.sf; o_f = flags.o_f; }
+								top_env fm)
+		| (_, _) -> failwith "valAD: BSR only implemented for 32b."
     (*bolean isimm_option captures whether the integer passed as parameter "offset" is an immediate (true) or the integer encoding of a variable (false)*)
     let shld_shrd op env flags svar svals smask patternvar patternvals
                   patternmask offset 
@@ -1847,6 +2111,7 @@ module Make (O : VALADOPT) =
                  | (_, _) ->
                      failwith
                        "valAD: arithmetic between 8-bit and 32-bit values is not implemented")
+ 					  | Absr -> bsr env flags dstvar dvals mkvar srcvar svals mkcvar
             | Ashift sop ->
                 shift env flags sop dstvar dvals srcvar svals mkcvar
             | AShld ->
@@ -1858,6 +2123,13 @@ module Make (O : VALADOPT) =
             | Aflag fop ->
                 test_cmp env flags fop dstvar dvals mkvar srcvar svals mkcvar
             | Aimul -> imul env flags dstvar dvals srcvar svals op arg3
+            | Acdq ->
+                (match (mkvar, mkcvar) with
+                 | (NoMask, NoMask) ->
+                     cdq env flags dstvar dvals srcvar svals
+                 | (_, _) ->
+                     failwith
+                       "valAD: cdq is only implemented for 32bit values")
             | _ -> assert false))
       
     let updval_set env flags dstvar mask cc =
@@ -1868,19 +2140,19 @@ module Make (O : VALADOPT) =
             let msk =
               (match mask with | NoMask -> assert false | Mask msk -> msk) in
             let (v_mask, v_shift) = mask_to_intoff msk in
-            let newval = bool_to_int64 flags.cf in
-            let newval = Int64.shift_left newval v_shift in
-            let val_set =
-              set_map
-                (fun x ->
-                   Int64.logor newval (Int64.logand (Int64.lognot v_mask) x))
-                dset
-            in
+            let newval =
               (match cc with
-               | (true, B) ->
+               | (true, B) -> (* SETC/SETB/SETNAE *)
+                   bool_to_int64 flags.cf
+               | (true, L) -> (* SETL/SETNGE *)
+                   bool_to_int64 (flags.sf <> flags.o_f)
+               | (false, LE) -> (* SETG/SETNLE *)
+                   bool_to_int64 ((not flags.zf) && (flags.sf == flags.o_f))
+               | _ -> failwith "ValAD: SET with an unsupported condition") in
+            let newval = Int64.shift_left newval v_shift in
+            let val_set = set_map (fun x -> Int64.logor newval (Int64.logand (Int64.lognot v_mask) x)) dset in
                    let new_env = VarMap.add dstvar (FSet val_set) env
                    in FlagMap.singleton flags new_env
-               | _ -> failwith "ValAD: SET with an unsupported condition")
         | _ -> (* For the time being we return top, *)
             (* until a more precise solution is implemented*)
             let top_env = VarMap.add dstvar top env
@@ -1896,6 +2168,12 @@ module Make (O : VALADOPT) =
         | Adiv ->
             div env flags dst1var dst1vals dst1mask dst2var dst2vals dst2mask
               svar svals smask
+        | Aimullong ->
+            mulimullong env flags dst1var dst1vals dst1mask dst2var dst2vals dst2mask
+              svar svals smask true
+        | Amullong ->
+            mulimullong env flags dst1var dst1vals dst1mask dst2var dst2vals dst2mask 
+              svar svals smask false											
         | _ ->
             failwith
               "valAD: The only supported operation with two destination operands is division."

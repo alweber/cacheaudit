@@ -334,7 +334,7 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
 					| Some (Imm i) -> true
 					| _ -> false in
 					perform_op op dst dlist src slist arg2 (Some isimm)
-			| Aarith _ | Acmov _ | Ashift _ | Amov | Aflag _ | Aimul | Adiv | Anot -> 
+			| Aarith _ | Acmov _ | Ashift _ | Amov | Aflag _ | Aimul | Adiv | Anot | Acdq | Absr-> 
 					perform_op op dst dlist src slist arg2 None
       | Aexchg -> 
 					let s_to_d_vals = perform_op Amov dst dlist src slist arg2 None in
@@ -394,8 +394,8 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
       list_join (List.concat (List.map do_ops slist)) in
     let res = 
       match op with
-			| Adiv ->
-				perform_op Adiv dst1 dlist1 dst2 dlist2 src slist 
+			| Adiv | Aimullong | Amullong->
+				perform_op op dst1 dlist1 dst2 dlist2 src slist 		
       | _ -> assert false in
      {res with cache = C.elapse res.cache time_instr}
   ) with Bottom -> failwith 
@@ -451,6 +451,7 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
             CmpOp -> failwith "8-bit CMP not implemented"
 					| _ -> update_mem env (Aarith op) (Op8 dst) (Op8 src) None None
     end
+	| Bsr (dst, src) -> update_mem env Absr (Op32 (Reg dst)) (Op32 src) None None
 	| Mov(dst,src) -> update_mem env Amov (Op32 dst) (Op32 src) None None 
 	| Cmov(cc, dst,src) -> update_mem env (Acmov cc) (Op32 dst) (Op32 src) None None 
   | Movb(dst,src) -> update_mem env Amov (Op8 dst) (Op8 src) None None
@@ -461,6 +462,10 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
 	| Not dst -> update_mem env Anot (Op32 dst) (Op32 (Imm 0xFFFFFFFFL)) None None
   | Imul(dst,src,imm) -> 
     update_mem env Aimul (Op32 (Reg dst)) (Op32 src) imm None
+	| ImulLong(dst1, dst2, src) -> 
+    update_mem_twodst env Aimullong (Op32 (Reg dst1)) (Op32 (Reg dst2)) (Op32 src)		
+	| MulLong(dst1, dst2, src) -> 
+    update_mem_twodst env Amullong (Op32 (Reg dst1)) (Op32 (Reg dst2)) (Op32 src)		
 	| Div(dst1, dst2, src) -> 
     update_mem_twodst env Adiv (Op32 (Reg dst1)) (Op32 (Reg dst2)) (Op32 src)
   | Shift(sop,dst32,offst8) -> 
@@ -476,6 +481,7 @@ module Make (F : FlagAD.S) (C:CacheAD.S) = struct
   | Inc x -> update_mem env (Aarith Inc) (Op32 x) (Op32 (Imm 1L)) None None
   | Dec x -> update_mem env (Aarith Dec) (Op32 x) (Op32 (Imm 1L)) None None
   | Set (cc,dst) -> updmem_set env (Op8 dst) cc
+  | Cdq -> update_mem env Acdq (Op32 (Reg EDX)) (Op32 (Reg EAX)) None None
   | i -> Format.printf "@[Unexpected instruction %a @, 
     in MemAD.interpret_instruction@]@." X86Print.pp_instr i;
     failwith "MemAD.interpret_instruction unexpected instruction"

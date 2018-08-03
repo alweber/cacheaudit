@@ -5,7 +5,7 @@
  * All rights reserved.
  *
  * Author: Adam Chlipala
- * Extended by: Alexandra Weber   
+ * Extended by: Johannes Schickel, Alexandra Weber   
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -152,6 +152,7 @@ let pp_instr fmt = function
     Arith (aop, dst, src) -> 
     fprintf fmt "@[@ %a@ %a,@ %a@]" pp_arith_op aop pp_op32 dst pp_op32 src
   | Arithb (aop, dst, src) -> fprintf fmt "@[%aB@ %a,@ %a@]" pp_arith_op aop pp_op8 dst pp_op8 src
+	| Bsr (dst, src) -> fprintf fmt "@[@ BSR@ %a,@ %a@]" pp_reg32 dst pp_op32 src
   | Call dst -> fprintf fmt "@[ CALL@ %a@]" pp_genop_addr32 dst
   | Cmp (dst, src) -> fprintf fmt "@[@ CMP@ %a,@ %a@]" pp_op32 dst pp_op32 src
 	| Cmpb (dst, src) -> fprintf fmt "@[@ CMP@ %a,@ %a@]" pp_op8 dst pp_op8 src
@@ -166,6 +167,8 @@ let pp_instr fmt = function
       | Some i -> fprintf fmt "@[@ IMUL@ %a,@ %a,@ %a@]" pp_reg32 dst pp_op32 src pp_addr i
       | None -> fprintf fmt "@[@ IMUL@ %a,@ %a@ ]" pp_reg32 dst pp_op32 src
     end 
+	| ImulLong (dst1, dst2, src) ->  fprintf fmt "@[@ IMUL@ %a:%a@,@ %a@]" pp_reg32 dst1 pp_reg32 dst2 pp_op32 src
+	| MulLong (dst1, dst2, src) ->  fprintf fmt "@[@ MUL@ %a:%a@,@ %a@]" pp_reg32 dst1 pp_reg32 dst2 pp_op32 src
 	| Div (dst1, dst2, src) ->  fprintf fmt "@[@ DIV@ %a:%a@,@ %a@]" pp_reg32 dst1 pp_reg32 dst2 pp_op32 src
   | Lea (dst, src) -> fprintf fmt "@[@ LEA@ %a,@ %a@]" pp_reg32 dst pp_address src
   | Leave -> fprintf fmt "@[ LEAVE@]"
@@ -183,6 +186,7 @@ let pp_instr fmt = function
  	| Shld (sregmem, patternreg, offsetregimm) -> fprintf fmt "@[@ SHLD@ %a@ %a,@ %a@]" pp_op32 sregmem pp_op32 patternreg pp_op8 offsetregimm
 	| Shrd (sregmem, patternreg, offsetregimm) -> fprintf fmt "@[@ SHRD@ %a@ %a,@ %a@]" pp_op32 sregmem pp_op32 patternreg pp_op8 offsetregimm
 	| Cmov (cc, dst, src) -> fprintf fmt "@[@ CMOV@ %a,@ %a,@ %a@]" pp_cc cc pp_op32 dst pp_op32 src 
+  | Cdq -> fprintf fmt "@[ CDQ@]"
   (*                          else fprintf fmt "@[@ Clear %a@]" pp_flag f *)
   (* | _ -> raise (PrintExn "x86Print: Unsupported instruction") *)
 

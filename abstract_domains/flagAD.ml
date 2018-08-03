@@ -218,13 +218,13 @@ module Make (V: ValAD.S) = struct
 		
 	let update_val_twodst env dst1var dst1mask dst2var dst2mask svar smask op =					
     match op with
-		| Adiv -> let res =
+		| Adiv | Aimullong | Amullong -> let res =
         FlagMap.fold (fun flgs vals newmap -> 
             join newmap (V.update_val_twodst vals flgs dst1var dst1mask dst2var dst2mask svar smask op)
           ) env FlagMap.empty in
         if is_bottom res then raise Bottom;
         res				
-			| _ -> failwith "flagAD: The only supported operation with two destination operands is division."
+			| _ -> failwith "flagAD: The only supported operations with two destination operands are division and multiplication."
 				
   let updval_set env var mask cc = let res =
     FlagMap.fold (fun flgs vals newmap -> 
